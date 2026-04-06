@@ -70,6 +70,8 @@ func main() {
 	// Admin routes (ADMIN role required)
 	adminMux.HandleFunc("POST /api/admin/employees", h.CreateEmployee)
 	adminMux.HandleFunc("GET /api/admin/employees", h.ListEmployees)
+	adminMux.HandleFunc("PUT /api/admin/employees/{id}", h.UpdateEmployee)
+	adminMux.HandleFunc("DELETE /api/admin/employees/{id}", h.DeleteEmployee)
 	adminMux.HandleFunc("POST /api/admin/shifts", h.CreateShift)
 	adminMux.HandleFunc("GET /api/admin/shifts", h.ListShifts)
 	adminMux.HandleFunc("GET /api/admin/logs", h.GetLogs)

@@ -142,6 +142,14 @@ When working on this project, agents **MUST** follow these steps:
    gh issue close <ISSUE_NUMBER> --comment "Implemented in this PR/branch"
    ```
 
+6. **Commit Changes** — Commit all changes with a descriptive message:
+
+   ```bash
+   git add .
+   git commit -m "feat: <description of what was implemented>"
+   git push
+   ```
+
 ---
 
 ## Code Style Guidelines

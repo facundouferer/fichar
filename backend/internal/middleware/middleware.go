@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/facundouferer/fichar/backend/internal/service"
@@ -17,6 +18,46 @@ const (
 	ContextKeyDNI    contextKey = "dni"
 	ContextKeyRole   contextKey = "role"
 )
+
+// RateLimiter implements a simple in-memory rate limiter
+type RateLimiter struct {
+	requests map[string][]time.Time
+	mu       sync.Mutex
+	limit    int
+	window   time.Duration
+}
+
+func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
+	return &RateLimiter{
+		requests: make(map[string][]time.Time),
+		limit:    limit,
+		window:   window,
+	}
+}
+
+func (rl *RateLimiter) Allow(key string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-rl.window)
+
+	// Filter out old requests
+	var recent []time.Time
+	for _, t := range rl.requests[key] {
+		if t.After(cutoff) {
+			recent = append(recent, t)
+		}
+	}
+
+	if len(recent) >= rl.limit {
+		rl.requests[key] = recent
+		return false
+	}
+
+	rl.requests[key] = append(recent, now)
+	return true
+}
 
 // LoggingMiddleware logs HTTP requests
 func LoggingMiddleware(next http.Handler) http.Handler {

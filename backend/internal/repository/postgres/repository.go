@@ -2,11 +2,16 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/facundouferer/fichar/backend/internal/domain"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ErrNoRows is returned when no rows are found
+var ErrNoRows = errors.New("no rows in result set")
 
 type EmployeeRepo struct {
 	pool *pgxpool.Pool
@@ -177,7 +182,7 @@ func NewAttendanceRepo(pool *pgxpool.Pool) *AttendanceRepo {
 func (r *AttendanceRepo) Create(ctx context.Context, att *domain.Attendance) error {
 	query := `
 		INSERT INTO attendances (id, employee_id, date, check_in, check_out, worked_hours, late, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		VALUES ($1, $2, $3::date, $4::timestamp, $5::timestamp, $6, $7, $8)
 	`
 	_, err := r.pool.Exec(ctx, query,
 		att.ID, att.EmployeeID, att.Date, att.CheckIn, att.CheckOut, att.WorkedHours, att.Late, att.CreatedAt)
@@ -196,12 +201,16 @@ func (r *AttendanceRepo) GetByID(ctx context.Context, id string) (*domain.Attend
 }
 
 func (r *AttendanceRepo) GetByEmployeeAndDate(ctx context.Context, employeeID, date string) (*domain.Attendance, error) {
-	query := `SELECT id, employee_id, date, check_in, check_out, worked_hours, late, created_at 
-		FROM attendances WHERE employee_id = $1 AND date = $2`
+	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, created_at 
+		FROM attendances WHERE employee_id = $1 AND date = $2::date`
 	var att domain.Attendance
 	err := r.pool.QueryRow(ctx, query, employeeID, date).Scan(
 		&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late, &att.CreatedAt)
 	if err != nil {
+		// Check if it's a "no rows" error
+		if strings.Contains(err.Error(), "no rows") {
+			return nil, ErrNoRows
+		}
 		return nil, err
 	}
 	return &att, nil
@@ -228,8 +237,11 @@ func (r *AttendanceRepo) GetByEmployeeID(ctx context.Context, employeeID string)
 }
 
 func (r *AttendanceRepo) Update(ctx context.Context, att *domain.Attendance) error {
-	query := `UPDATE attendances SET check_in = $2, check_out = $3, worked_hours = $4, late = $5 WHERE id = $1`
-	_, err := r.pool.Exec(ctx, query, att.ID, att.CheckIn, att.CheckOut, att.WorkedHours, att.Late)
+	// Only update check_out, worked_hours, and late - check_in should already be set
+	// Use NOW() for check_out since that's the actual current time
+	// Note: worked_hours is passed directly as float64 pointer
+	query := `UPDATE attendances SET check_out = NOW(), worked_hours = $2, late = $3 WHERE id = $1`
+	_, err := r.pool.Exec(ctx, query, att.ID, att.WorkedHours, att.Late)
 	return err
 }
 

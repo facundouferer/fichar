@@ -63,6 +63,7 @@ func main() {
 
 	// Public routes (no auth)
 	publicMux.HandleFunc("POST /api/auth/login", authH.Login)
+	publicMux.HandleFunc("POST /api/attendance/check", h.CheckAttendance)
 
 	// Protected routes (require auth, no role check)
 	protectedMux.HandleFunc("POST /api/auth/change-password", authH.ChangePassword)
@@ -83,10 +84,12 @@ func main() {
 	// Employee routes (authenticated)
 	employeeMux.HandleFunc("GET /api/employees/{id}", h.GetEmployee)
 	employeeMux.HandleFunc("GET /api/employees/{id}/attendances", h.GetEmployeeAttendances)
-	employeeMux.HandleFunc("POST /api/attendance/check", h.CheckAttendance)
 
 	// Apply auth middleware
 	authMiddleware := middleware.AuthMiddleware(authSvc)
+
+	// Rate limiter for public endpoints (5 requests per minute per IP)
+	rateLimiter := middleware.NewRateLimiter(5, time.Minute)
 
 	// Wrap with role check
 	adminHandler := authMiddleware(middleware.RequireRole("ADMIN")(adminMux))
@@ -100,6 +103,7 @@ func main() {
 		adminHandler:     adminHandler,
 		employeeHandler:  employeeHandler,
 		healthHandler:    h.Health,
+		rateLimiter:      rateLimiter,
 	}
 
 	// Apply CORS and logging
@@ -153,6 +157,7 @@ type Router struct {
 	adminHandler     http.Handler
 	employeeHandler  http.Handler
 	healthHandler    func(http.ResponseWriter, *http.Request)
+	rateLimiter      *middleware.RateLimiter
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -161,6 +166,18 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// Health check
 	if path == "/health" {
 		r.healthHandler(w, req)
+		return
+	}
+
+	// Rate limiting for public endpoints (login and attendance check)
+	if req.Method == "POST" && (path == "/api/auth/login" || path == "/api/attendance/check") {
+		// Get client IP for rate limiting
+		clientIP := getClientIP(req)
+		if !r.rateLimiter.Allow(clientIP) {
+			http.Error(w, "Too many requests", http.StatusTooManyRequests)
+			return
+		}
+		r.publicMux.ServeHTTP(w, req)
 		return
 	}
 
@@ -183,11 +200,22 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Employee routes - require auth
-	if strings.HasPrefix(path, "/api/employees/") || strings.HasPrefix(path, "/api/attendance/") {
+	if strings.HasPrefix(path, "/api/employees/") {
 		r.employeeHandler.ServeHTTP(w, req)
 		return
 	}
 
 	// Default - 404
 	http.NotFound(w, req)
+}
+
+// getClientIP extracts the real client IP from request
+func getClientIP(req *http.Request) string {
+	// Check for forwarded header (when behind proxy)
+	forwarded := req.Header.Get("X-Forwarded-For")
+	if forwarded != "" {
+		return strings.Split(forwarded, ",")[0]
+	}
+	// Fall back to remote address
+	return req.RemoteAddr
 }

@@ -3,12 +3,14 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"path"
 	"strings"
 	"time"
 
 	"github.com/facundouferer/fichar/backend/internal/domain"
+	"github.com/facundouferer/fichar/backend/internal/repository/postgres"
 	"github.com/facundouferer/fichar/backend/internal/service"
 	"github.com/google/uuid"
 )
@@ -460,9 +462,184 @@ func (h *Handler) DeleteShift(w http.ResponseWriter, r *http.Request) {
 
 // Attendance handlers
 
+type CheckAttendanceRequest struct {
+	DNI string `json:"dni"`
+}
+
+type CheckAttendanceResponse struct {
+	Operation  string `json:"operation"` // "check_in" or "check_out"
+	EmployeeID string `json:"employee_id"`
+	Date       string `json:"date"`
+	CheckIn    string `json:"check_in,omitempty"`
+	CheckOut   string `json:"check_out,omitempty"`
+	Message    string `json:"message"`
+}
+
 func (h *Handler) CheckAttendance(w http.ResponseWriter, r *http.Request) {
+	var req CheckAttendanceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate DNI
+	if req.DNI == "" {
+		http.Error(w, "DNI is required", http.StatusBadRequest)
+		return
+	}
+
+	// Find employee by DNI
+	emp, err := h.employeeSvc.GetByDNI(r.Context(), req.DNI)
+	if err != nil {
+		http.Error(w, "Employee not found with given DNI", http.StatusNotFound)
+		return
+	}
+
+	// Get today's date
+	today := time.Now().Format("2006-01-02")
+	now := time.Now()
+
+	// Check if there's an attendance record for today
+	existing, err := h.attendanceSvc.GetByEmployeeAndDate(r.Context(), emp.ID, today)
+	if err != nil && err != postgres.ErrNoRows {
+		log.Printf("CheckAttendance: GetByEmployeeAndDate error: %v", err)
+		http.Error(w, "Failed to check attendance", http.StatusInternalServerError)
+		return
+	}
+
+	var response CheckAttendanceResponse
+
+	if existing == nil || existing.CheckIn == nil {
+		// No attendance record or no check-in → Check IN
+		checkInTime := now.Format("2006-01-02T15:04:05")
+
+		// Determine if late based on shift start time
+		late := false
+		assignment, err := h.employeeShiftSvc.GetCurrentByEmployeeID(r.Context(), emp.ID)
+		if err == nil && assignment != nil {
+			// Get shift to check if late
+			shift, err := h.shiftSvc.GetByID(r.Context(), assignment.ShiftID)
+			if err == nil {
+				// Check if check-in is after expected start (15 min tolerance)
+				late = isLate(checkInTime, shift.StartTime, 15)
+			}
+		}
+
+		att := &domain.Attendance{
+			ID:         generateUUID(),
+			EmployeeID: emp.ID,
+			Date:       today,
+			CheckIn:    &checkInTime,
+			Late:       late,
+			CreatedAt:  now,
+		}
+
+		if err := h.attendanceSvc.Create(r.Context(), att); err != nil {
+			http.Error(w, "Failed to record check-in", http.StatusInternalServerError)
+			return
+		}
+
+		response = CheckAttendanceResponse{
+			Operation:  "check_in",
+			EmployeeID: emp.ID,
+			Date:       today,
+			CheckIn:    checkInTime,
+			Message:    "Check-in recorded successfully",
+		}
+	} else if existing.CheckOut == nil {
+		// Has check-in but no check-out → Check OUT
+		checkOutTime := now.Format("2006-01-02T15:04:05")
+
+		// Calculate worked hours
+		var workedHours float64
+		if existing.CheckIn != nil {
+			workedHours = calculateHours(*existing.CheckIn, checkOutTime)
+		}
+
+		// Create a simple update object to avoid encoding issues
+		workedPtr := &workedHours
+		updateAtt := &domain.Attendance{
+			ID:          existing.ID,
+			WorkedHours: workedPtr,
+			Late:        existing.Late,
+		}
+
+		if err := h.attendanceSvc.Update(r.Context(), updateAtt); err != nil {
+			http.Error(w, "Failed to record check-out", http.StatusInternalServerError)
+			return
+		}
+
+		response = CheckAttendanceResponse{
+			Operation:  "check_out",
+			EmployeeID: emp.ID,
+			Date:       today,
+			CheckIn:    *existing.CheckIn,
+			CheckOut:   checkOutTime,
+			Message:    "Check-out recorded successfully",
+		}
+	} else {
+		// Already has both check-in and check-out for today
+		http.Error(w, "Attendance already completed for today", http.StatusConflict)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "not implemented"})
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
+
+// Helper: isLate checks if check-in time is after shift start + tolerance
+func isLate(checkInTime, shiftStart string, toleranceMinutes int) bool {
+	const layout = "2006-01-02T15:04:05"
+	shiftTime, err := time.Parse(layout, "2006-01-02T"+shiftStart+":00")
+	if err != nil {
+		return false
+	}
+	checkIn, err := time.Parse(layout, checkInTime)
+	if err != nil {
+		return false
+	}
+	// Add tolerance
+	shiftTime = shiftTime.Add(time.Duration(toleranceMinutes) * time.Minute)
+	return checkIn.After(shiftTime)
+}
+
+// Helper: calculateHours calculates hours between two timestamps
+func calculateHours(checkIn, checkOut string) float64 {
+	// Try different layouts to handle both API format (with T) and DB format (with space)
+	layouts := []string{"2006-01-02T15:04:05", "2006-01-02 15:04:05"}
+
+	var in, out time.Time
+	var err error
+
+	for _, layout := range layouts {
+		in, err = time.Parse(layout, checkIn)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		log.Printf("calculateHours: failed to parse check_in: %v", err)
+		return 0
+	}
+
+	for _, layout := range layouts {
+		out, err = time.Parse(layout, checkOut)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		log.Printf("calculateHours: failed to parse check_out: %v", err)
+		return 0
+	}
+
+	duration := out.Sub(in)
+	hours := duration.Hours()
+	if hours < 0 {
+		hours += 24 // Handle overnight shifts
+	}
+	return hours
 }
 
 func (h *Handler) GetEmployeeAttendances(w http.ResponseWriter, r *http.Request) {

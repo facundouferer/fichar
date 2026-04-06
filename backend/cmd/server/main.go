@@ -1,0 +1,188 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/facundouferer/fichar/backend/internal/config"
+	"github.com/facundouferer/fichar/backend/internal/handler"
+	"github.com/facundouferer/fichar/backend/internal/middleware"
+	"github.com/facundouferer/fichar/backend/internal/repository/postgres"
+	"github.com/facundouferer/fichar/backend/internal/service"
+	"github.com/facundouferer/fichar/backend/pkg/database"
+)
+
+func main() {
+	// Load configuration
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Connect to database
+	ctx := context.Background()
+	db, err := database.Connect(ctx, cfg.Database.URL)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+	log.Println("Database connected successfully")
+
+	// Initialize repositories
+	pool := db.GetPool()
+	employeeRepo := postgres.NewEmployeeRepo(pool)
+	shiftRepo := postgres.NewShiftRepo(pool)
+	attendanceRepo := postgres.NewAttendanceRepo(pool)
+	logRepo := postgres.NewLogRepo(pool)
+	employeeShiftRepo := postgres.NewEmployeeShiftRepo(pool)
+
+	// Initialize services
+	employeeSvc := service.NewEmployeeService(employeeRepo)
+	shiftSvc := service.NewShiftService(shiftRepo)
+	attendanceSvc := service.NewAttendanceService(attendanceRepo, employeeRepo, employeeShiftRepo)
+	logSvc := service.NewLogService(logRepo)
+	employeeShiftSvc := service.NewEmployeeShiftService(employeeShiftRepo)
+	authSvc := service.NewAuthService(employeeRepo, cfg.JWT.Secret)
+
+	// Initialize handlers
+	h := handler.NewHandler(employeeSvc, shiftSvc, attendanceSvc, logSvc, employeeShiftSvc)
+	authH := handler.NewAuthHandler(authSvc)
+
+	// Create routers
+	publicMux := http.NewServeMux()
+	adminMux := http.NewServeMux()
+	employeeMux := http.NewServeMux()
+	protectedMux := http.NewServeMux()
+
+	// Public routes (no auth)
+	publicMux.HandleFunc("POST /api/auth/login", authH.Login)
+
+	// Protected routes (require auth, no role check)
+	protectedMux.HandleFunc("POST /api/auth/change-password", authH.ChangePassword)
+
+	// Admin routes (ADMIN role required)
+	adminMux.HandleFunc("POST /api/admin/employees", h.CreateEmployee)
+	adminMux.HandleFunc("GET /api/admin/employees", h.ListEmployees)
+	adminMux.HandleFunc("POST /api/admin/shifts", h.CreateShift)
+	adminMux.HandleFunc("GET /api/admin/shifts", h.ListShifts)
+	adminMux.HandleFunc("GET /api/admin/logs", h.GetLogs)
+	adminMux.HandleFunc("POST /api/admin/employee-shifts", h.AssignShift)
+
+	// Employee routes (authenticated)
+	employeeMux.HandleFunc("GET /api/employees/{id}", h.GetEmployee)
+	employeeMux.HandleFunc("GET /api/employees/{id}/attendances", h.GetEmployeeAttendances)
+	employeeMux.HandleFunc("POST /api/attendance/check", h.CheckAttendance)
+
+	// Apply auth middleware
+	authMiddleware := middleware.AuthMiddleware(authSvc)
+
+	// Wrap with role check
+	adminHandler := authMiddleware(middleware.RequireRole("ADMIN")(adminMux))
+	employeeHandler := authMiddleware(employeeMux)
+	protectedHandler := authMiddleware(protectedMux)
+
+	// Custom router to handle path matching properly
+	router := &Router{
+		publicMux:        publicMux,
+		protectedHandler: protectedHandler,
+		adminHandler:     adminHandler,
+		employeeHandler:  employeeHandler,
+		healthHandler:    h.Health,
+	}
+
+	// Apply CORS and logging
+	handler := middleware.LoggingMiddleware(middleware.CORSMiddleware(router))
+
+	// Server configuration
+	port := cfg.Server.Port
+	if port == "" {
+		port = "8080"
+	}
+	addr := ":" + port
+
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      handler,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	// Start server in goroutine
+	go func() {
+		log.Printf("Backend server starting on %s", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down server...")
+
+	// Graceful shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("Server forced to shutdown: %v", err)
+	}
+
+	log.Println("Server exited")
+	fmt.Println("Server stopped")
+	os.Exit(0)
+}
+
+// Router handles path-based routing
+type Router struct {
+	publicMux        *http.ServeMux
+	protectedHandler http.Handler
+	adminHandler     http.Handler
+	employeeHandler  http.Handler
+	healthHandler    func(http.ResponseWriter, *http.Request)
+}
+
+func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	path := req.URL.Path
+
+	// Health check
+	if path == "/health" {
+		r.healthHandler(w, req)
+		return
+	}
+
+	// Public routes - no auth required
+	if req.Method == "POST" && path == "/api/auth/login" {
+		r.publicMux.ServeHTTP(w, req)
+		return
+	}
+
+	// Protected routes - require auth but no role
+	if strings.HasPrefix(path, "/api/auth/") && path != "/api/auth/login" {
+		r.protectedHandler.ServeHTTP(w, req)
+		return
+	}
+
+	// Admin routes - require ADMIN role
+	if strings.HasPrefix(path, "/api/admin/") {
+		r.adminHandler.ServeHTTP(w, req)
+		return
+	}
+
+	// Employee routes - require auth
+	if strings.HasPrefix(path, "/api/employees/") || strings.HasPrefix(path, "/api/attendance/") {
+		r.employeeHandler.ServeHTTP(w, req)
+		return
+	}
+
+	// Default - 404
+	http.NotFound(w, req)
+}

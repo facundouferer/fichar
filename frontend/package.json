@@ -1,0 +1,20 @@
+{
+  "name": "fichar-frontend",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "node src/server/entry.mjs",
+    "build": "astro build",
+    "preview": "node src/server/entry.mjs",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "astro": "^6.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

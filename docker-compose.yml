@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fichar-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fichar}
+      POSTGRES_USER: ${POSTGRES_USER:-fichar_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fichar_user -d fichar"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fichar-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fichar-backend
+    environment:
+      PORT: ${BACKEND_PORT:-8080}
+      DATABASE_URL: postgres://fichar_user:${POSTGRES_PASSWORD:-changeme}@postgres:5432/fichar?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    networks:
+      - fichar-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: fichar-frontend
+    environment:
+      PORT: ${FRONTEND_PORT:-4321}
+      API_URL: ${API_URL:-http://backend:8080}
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-4321}:4321"
+    networks:
+      - fichar-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  fichar-network:
+    driver: bridge

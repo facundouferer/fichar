@@ -58,3 +58,28 @@ type Log struct {
 	Description string    `json:"description"`
 	CreatedAt   time.Time `json:"created_at"`
 }
+
+type MonthlySummary struct {
+	Year          int            `json:"year"`
+	Month         int            `json:"month"`
+	EmployeeID    string         `json:"employee_id"`
+	TotalDays     int            `json:"total_days"`
+	WorkedDays    int            `json:"worked_days"`
+	MissingDays   int            `json:"missing_days"`
+	ExpectedHours float64        `json:"expected_hours"`
+	WorkedHours   float64        `json:"worked_hours"`
+	MissingHours  float64        `json:"missing_hours"`
+	ExtraHours    float64        `json:"extra_hours"`
+	LateArrivals  int            `json:"late_arrivals"`
+	DailyDetails  []DailySummary `json:"daily_details"`
+}
+
+type DailySummary struct {
+	Date          string  `json:"date"`
+	CheckIn       string  `json:"check_in,omitempty"`
+	CheckOut      string  `json:"check_out,omitempty"`
+	WorkedHours   float64 `json:"worked_hours"`
+	ExpectedHours float64 `json:"expected_hours"`
+	IsLate        bool    `json:"is_late"`
+	ShiftName     string  `json:"shift_name,omitempty"`
+}

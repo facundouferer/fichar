@@ -46,9 +46,9 @@ func main() {
 	// Initialize services
 	employeeSvc := service.NewEmployeeService(employeeRepo)
 	shiftSvc := service.NewShiftService(shiftRepo)
-	attendanceSvc := service.NewAttendanceService(attendanceRepo, employeeRepo, employeeShiftRepo)
-	logSvc := service.NewLogService(logRepo)
 	employeeShiftSvc := service.NewEmployeeShiftService(employeeShiftRepo)
+	attendanceSvc := service.NewAttendanceService(attendanceRepo, employeeRepo, shiftSvc, employeeShiftSvc)
+	logSvc := service.NewLogService(logRepo)
 	authSvc := service.NewAuthService(employeeRepo, cfg.JWT.Secret)
 
 	// Initialize handlers

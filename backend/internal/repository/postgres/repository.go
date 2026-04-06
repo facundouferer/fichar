@@ -217,9 +217,42 @@ func (r *AttendanceRepo) GetByEmployeeAndDate(ctx context.Context, employeeID, d
 }
 
 func (r *AttendanceRepo) GetByEmployeeID(ctx context.Context, employeeID string) ([]*domain.Attendance, error) {
-	query := `SELECT id, employee_id, date, check_in, check_out, worked_hours, late, created_at 
+	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, created_at 
 		FROM attendances WHERE employee_id = $1 ORDER BY date DESC`
 	rows, err := r.pool.Query(ctx, query, employeeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var attendances []*domain.Attendance
+	for rows.Next() {
+		var att domain.Attendance
+		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late, &att.CreatedAt); err != nil {
+			return nil, err
+		}
+		attendances = append(attendances, &att)
+	}
+	return attendances, nil
+}
+
+func (r *AttendanceRepo) GetByEmployeeAndMonth(ctx context.Context, employeeID string, year int, month int) ([]*domain.Attendance, error) {
+	// Build date range for the month
+	startDate := fmt.Sprintf("%d-%02d-01", year, month)
+	// Calculate first day of next month for range end
+	if month == 12 {
+		year++
+		month = 1
+	} else {
+		month++
+	}
+	endDate := fmt.Sprintf("%d-%02d-01", year, month)
+
+	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, created_at 
+		FROM attendances 
+		WHERE employee_id = $1 AND date >= $2::date AND date < $3::date
+		ORDER BY date ASC`
+	rows, err := r.pool.Query(ctx, query, employeeID, startDate, endDate)
 	if err != nil {
 		return nil, err
 	}
@@ -331,6 +364,38 @@ func (r *EmployeeShiftRepo) GetByEmployeeID(ctx context.Context, employeeID stri
 	query := `SELECT id, employee_id, shift_id, start_date::text, end_date::text 
 		FROM employee_shift_assignments WHERE employee_id = $1 ORDER BY start_date DESC`
 	rows, err := r.pool.Query(ctx, query, employeeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var assignments []*domain.EmployeeShiftAssignment
+	for rows.Next() {
+		var a domain.EmployeeShiftAssignment
+		if err := rows.Scan(&a.ID, &a.EmployeeID, &a.ShiftID, &a.StartDate, &a.EndDate); err != nil {
+			return nil, err
+		}
+		assignments = append(assignments, &a)
+	}
+	return assignments, nil
+}
+
+func (r *EmployeeShiftRepo) GetByEmployeeAndMonth(ctx context.Context, employeeID string, year int, month int) ([]*domain.EmployeeShiftAssignment, error) {
+	// Get shift assignments that overlap with the given month
+	startDate := fmt.Sprintf("%d-%02d-01", year, month)
+	if month == 12 {
+		year++
+		month = 1
+	} else {
+		month++
+	}
+	endDate := fmt.Sprintf("%d-%02d-01", year, month)
+
+	query := `SELECT id, employee_id, shift_id, start_date::text, end_date::text 
+		FROM employee_shift_assignments 
+		WHERE employee_id = $1 AND start_date < $3::date AND (end_date IS NULL OR end_date >= $2::date)
+		ORDER BY start_date ASC`
+	rows, err := r.pool.Query(ctx, query, employeeID, startDate, endDate)
 	if err != nil {
 		return nil, err
 	}

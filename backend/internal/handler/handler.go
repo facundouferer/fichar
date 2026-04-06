@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -588,6 +589,54 @@ func (h *Handler) CheckAttendance(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// GetEmployeeAttendances returns attendances for an employee
+func (h *Handler) GetEmployeeAttendances(w http.ResponseWriter, r *http.Request) {
+	// Path is /api/employees/{id}/attendances
+	// Extract employee ID from path
+	pathParts := strings.Split(strings.TrimSuffix(r.URL.Path, "/attendances"), "/")
+	id := ""
+	for i, part := range pathParts {
+		if part == "employees" && i+1 < len(pathParts) {
+			id = pathParts[i+1]
+			break
+		}
+	}
+	if id == "" {
+		http.Error(w, "Employee ID required", http.StatusBadRequest)
+		return
+	}
+
+	// Check for year/month query params
+	year := r.URL.Query().Get("year")
+	month := r.URL.Query().Get("month")
+
+	if year != "" && month != "" {
+		// Get monthly summary
+		y, _ := strconv.Atoi(year)
+		m, _ := strconv.Atoi(month)
+
+		summary, err := h.attendanceSvc.CalculateMonthlySummary(r.Context(), id, y, m)
+		if err != nil {
+			http.Error(w, "Failed to get monthly summary", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(summary)
+		return
+	}
+
+	// Get all attendances
+	attendances, err := h.attendanceSvc.GetByEmployeeID(r.Context(), id)
+	if err != nil {
+		http.Error(w, "Failed to get attendances", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(attendances)
+}
+
 // Helper: isLate checks if check-in time is after shift start + tolerance
 func isLate(checkInTime, shiftStart string, toleranceMinutes int) bool {
 	const layout = "2006-01-02T15:04:05"
@@ -640,11 +689,6 @@ func calculateHours(checkIn, checkOut string) float64 {
 		hours += 24 // Handle overnight shifts
 	}
 	return hours
-}
-
-func (h *Handler) GetEmployeeAttendances(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "not implemented"})
 }
 
 // Log handlers

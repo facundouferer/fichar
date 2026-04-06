@@ -28,6 +28,7 @@ type AttendanceRepository interface {
 	GetByID(ctx context.Context, id string) (*domain.Attendance, error)
 	GetByEmployeeAndDate(ctx context.Context, employeeID, date string) (*domain.Attendance, error)
 	GetByEmployeeID(ctx context.Context, employeeID string) ([]*domain.Attendance, error)
+	GetByEmployeeAndMonth(ctx context.Context, employeeID string, year int, month int) ([]*domain.Attendance, error)
 	Update(ctx context.Context, att *domain.Attendance) error
 	Delete(ctx context.Context, id string) error
 }
@@ -41,6 +42,7 @@ type LogRepository interface {
 type EmployeeShiftRepository interface {
 	Create(ctx context.Context, assignment *domain.EmployeeShiftAssignment) error
 	GetByEmployeeID(ctx context.Context, employeeID string) ([]*domain.EmployeeShiftAssignment, error)
+	GetByEmployeeAndMonth(ctx context.Context, employeeID string, year int, month int) ([]*domain.EmployeeShiftAssignment, error)
 	GetCurrentByEmployeeID(ctx context.Context, employeeID string) (*domain.EmployeeShiftAssignment, error)
 	Delete(ctx context.Context, id string) error
 }

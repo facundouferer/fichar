@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"path"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/facundouferer/fichar/backend/internal/domain"
+	"github.com/facundouferer/fichar/backend/internal/middleware"
 	"github.com/facundouferer/fichar/backend/internal/repository/postgres"
 	"github.com/facundouferer/fichar/backend/internal/service"
 	"github.com/google/uuid"
@@ -158,6 +160,13 @@ func (h *Handler) CreateEmployee(w http.ResponseWriter, r *http.Request) {
 	if err := h.employeeSvc.Create(r.Context(), emp); err != nil {
 		http.Error(w, "Failed to create employee", http.StatusInternalServerError)
 		return
+	}
+
+	// Audit log for employee creation
+	adminID := r.Context().Value(middleware.ContextKeyUserID)
+	if adminID != nil {
+		adminStr := adminID.(string)
+		h.logSvc.Audit(r.Context(), &adminStr, "CREATE_EMPLOYEE", fmt.Sprintf("Created employee %s (%s %s)", emp.DNI, emp.FirstName, emp.LastName))
 	}
 
 	// If shift_id provided, assign shift
@@ -361,6 +370,13 @@ func (h *Handler) CreateShift(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Audit log for shift creation
+	adminID := r.Context().Value(middleware.ContextKeyUserID)
+	if adminID != nil {
+		adminStr := adminID.(string)
+		h.logSvc.Audit(r.Context(), &adminStr, "CREATE_SHIFT", fmt.Sprintf("Created shift '%s' (%s - %s, %.1fh)", shift.Name, shift.StartTime, shift.EndTime, shift.ExpectedHours))
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(shiftToResponse(shift))
@@ -540,6 +556,10 @@ func (h *Handler) CheckAttendance(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Audit log for check-in
+		userID := emp.ID
+		h.logSvc.Audit(r.Context(), &userID, "CHECK_IN", fmt.Sprintf("Employee %s checked in at %s", emp.DNI, checkInTime))
+
 		response = CheckAttendanceResponse{
 			Operation:  "check_in",
 			EmployeeID: emp.ID,
@@ -569,6 +589,10 @@ func (h *Handler) CheckAttendance(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed to record check-out", http.StatusInternalServerError)
 			return
 		}
+
+		// Audit log for check-out
+		userID := emp.ID
+		h.logSvc.Audit(r.Context(), &userID, "CHECK_OUT", fmt.Sprintf("Employee %s checked out at %s", emp.DNI, checkOutTime))
 
 		response = CheckAttendanceResponse{
 			Operation:  "check_out",
@@ -693,9 +717,38 @@ func calculateHours(checkIn, checkOut string) float64 {
 
 // Log handlers
 
+type LogResponse struct {
+	ID          string `json:"id"`
+	UserID      string `json:"user_id,omitempty"`
+	Action      string `json:"action"`
+	Description string `json:"description"`
+	CreatedAt   string `json:"created_at"`
+}
+
 func (h *Handler) GetLogs(w http.ResponseWriter, r *http.Request) {
+	logs, err := h.logSvc.List(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get logs", http.StatusInternalServerError)
+		return
+	}
+
+	response := make([]LogResponse, len(logs))
+	for i, log := range logs {
+		var userID string
+		if log.UserID != nil {
+			userID = *log.UserID
+		}
+		response[i] = LogResponse{
+			ID:          log.ID,
+			UserID:      userID,
+			Action:      log.Action,
+			Description: log.Description,
+			CreatedAt:   log.CreatedAt.Format("2006-01-02T15:04:05"),
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "not implemented"})
+	json.NewEncoder(w).Encode(response)
 }
 
 // EmployeeShift handlers
@@ -782,6 +835,13 @@ func (h *Handler) AssignShift(w http.ResponseWriter, r *http.Request) {
 	if err := h.employeeShiftSvc.Create(r.Context(), assignment); err != nil {
 		http.Error(w, "Failed to assign shift", http.StatusInternalServerError)
 		return
+	}
+
+	// Audit log for shift assignment
+	adminID := r.Context().Value(middleware.ContextKeyUserID)
+	if adminID != nil {
+		adminStr := adminID.(string)
+		h.logSvc.Audit(r.Context(), &adminStr, "ASSIGN_SHIFT", fmt.Sprintf("Assigned shift %s to employee %s from %s", assignment.ShiftID, assignment.EmployeeID, assignment.StartDate))
 	}
 
 	w.Header().Set("Content-Type", "application/json")

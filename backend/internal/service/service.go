@@ -7,6 +7,7 @@ import (
 
 	"github.com/facundouferer/fichar/backend/internal/domain"
 	"github.com/facundouferer/fichar/backend/internal/repository"
+	"github.com/google/uuid"
 )
 
 type EmployeeService struct {
@@ -323,6 +324,23 @@ func NewLogService(repo repository.LogRepository) *LogService {
 
 func (s *LogService) Create(ctx context.Context, log *domain.Log) error {
 	return s.repo.Create(ctx, log)
+}
+
+// Audit creates an audit log entry with the given action and description
+func (s *LogService) Audit(ctx context.Context, userID *string, action, description string) error {
+	logEntry := &domain.Log{
+		ID:          generateLogID(),
+		UserID:      userID,
+		Action:      action,
+		Description: description,
+		CreatedAt:   time.Now(),
+	}
+	return s.repo.Create(ctx, logEntry)
+}
+
+// generateLogID generates a unique ID for log entries
+func generateLogID() string {
+	return uuid.New().String()
 }
 
 func (s *LogService) GetByUserID(ctx context.Context, userID string) ([]*domain.Log, error) {

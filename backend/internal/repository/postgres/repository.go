@@ -78,6 +78,9 @@ func (r *EmployeeRepo) List(ctx context.Context) ([]*domain.Employee, error) {
 		}
 		employees = append(employees, &emp)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return employees, nil
 }
 
@@ -110,7 +113,7 @@ func NewShiftRepo(pool *pgxpool.Pool) *ShiftRepo {
 func (r *ShiftRepo) Create(ctx context.Context, shift *domain.Shift) error {
 	query := `
 		INSERT INTO shifts (id, name, start_time, end_time, expected_hours, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		VALUES ($1, $2, $3::time, $4::time, $5, $6)
 	`
 	_, err := r.pool.Exec(ctx, query,
 		shift.ID, shift.Name, shift.StartTime, shift.EndTime, shift.ExpectedHours, shift.CreatedAt)
@@ -118,7 +121,7 @@ func (r *ShiftRepo) Create(ctx context.Context, shift *domain.Shift) error {
 }
 
 func (r *ShiftRepo) GetByID(ctx context.Context, id string) (*domain.Shift, error) {
-	query := `SELECT id, name, start_time, end_time, expected_hours, created_at FROM shifts WHERE id = $1`
+	query := `SELECT id, name, start_time::text, end_time::text, expected_hours, created_at FROM shifts WHERE id = $1`
 	var shift domain.Shift
 	err := r.pool.QueryRow(ctx, query, id).Scan(
 		&shift.ID, &shift.Name, &shift.StartTime, &shift.EndTime, &shift.ExpectedHours, &shift.CreatedAt)
@@ -129,7 +132,7 @@ func (r *ShiftRepo) GetByID(ctx context.Context, id string) (*domain.Shift, erro
 }
 
 func (r *ShiftRepo) List(ctx context.Context) ([]*domain.Shift, error) {
-	query := `SELECT id, name, start_time, end_time, expected_hours, created_at FROM shifts ORDER BY name`
+	query := `SELECT id, name, start_time::text, end_time::text, expected_hours, created_at FROM shifts ORDER BY name`
 	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
 		return nil, err
@@ -143,6 +146,9 @@ func (r *ShiftRepo) List(ctx context.Context) ([]*domain.Shift, error) {
 			return nil, err
 		}
 		shifts = append(shifts, &shift)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return shifts, nil
 }
@@ -302,7 +308,7 @@ func NewEmployeeShiftRepo(pool *pgxpool.Pool) *EmployeeShiftRepo {
 func (r *EmployeeShiftRepo) Create(ctx context.Context, assignment *domain.EmployeeShiftAssignment) error {
 	query := `
 		INSERT INTO employee_shift_assignments (id, employee_id, shift_id, start_date, end_date)
-		VALUES ($1, $2, $3, $4, $5)
+		VALUES ($1, $2, $3, $4::date, $5::date)
 	`
 	_, err := r.pool.Exec(ctx, query,
 		assignment.ID, assignment.EmployeeID, assignment.ShiftID, assignment.StartDate, assignment.EndDate)
@@ -310,7 +316,7 @@ func (r *EmployeeShiftRepo) Create(ctx context.Context, assignment *domain.Emplo
 }
 
 func (r *EmployeeShiftRepo) GetByEmployeeID(ctx context.Context, employeeID string) ([]*domain.EmployeeShiftAssignment, error) {
-	query := `SELECT id, employee_id, shift_id, start_date, end_date 
+	query := `SELECT id, employee_id, shift_id, start_date::text, end_date::text 
 		FROM employee_shift_assignments WHERE employee_id = $1 ORDER BY start_date DESC`
 	rows, err := r.pool.Query(ctx, query, employeeID)
 	if err != nil {
@@ -330,7 +336,7 @@ func (r *EmployeeShiftRepo) GetByEmployeeID(ctx context.Context, employeeID stri
 }
 
 func (r *EmployeeShiftRepo) GetCurrentByEmployeeID(ctx context.Context, employeeID string) (*domain.EmployeeShiftAssignment, error) {
-	query := `SELECT id, employee_id, shift_id, start_date, end_date 
+	query := `SELECT id, employee_id, shift_id, start_date::text, end_date::text 
 		FROM employee_shift_assignments 
 		WHERE employee_id = $1 AND (end_date IS NULL OR end_date >= CURRENT_DATE)
 		ORDER BY start_date DESC LIMIT 1`

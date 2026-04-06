@@ -74,8 +74,11 @@ func main() {
 	adminMux.HandleFunc("DELETE /api/admin/employees/{id}", h.DeleteEmployee)
 	adminMux.HandleFunc("POST /api/admin/shifts", h.CreateShift)
 	adminMux.HandleFunc("GET /api/admin/shifts", h.ListShifts)
+	adminMux.HandleFunc("PUT /api/admin/shifts/{id}", h.UpdateShift)
+	adminMux.HandleFunc("DELETE /api/admin/shifts/{id}", h.DeleteShift)
 	adminMux.HandleFunc("GET /api/admin/logs", h.GetLogs)
 	adminMux.HandleFunc("POST /api/admin/employee-shifts", h.AssignShift)
+	adminMux.HandleFunc("GET /api/admin/employees/{id}/shifts", h.GetEmployeeShifts)
 
 	// Employee routes (authenticated)
 	employeeMux.HandleFunc("GET /api/employees/{id}", h.GetEmployee)

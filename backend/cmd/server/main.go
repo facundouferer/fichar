@@ -201,7 +201,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Admin routes - require ADMIN role
-	if strings.HasPrefix(path, "/api/admin/") {
+	if strings.HasPrefix(path, "/api/admin/") || strings.HasPrefix(path, "/api/reports/") {
 		r.adminHandler.ServeHTTP(w, req)
 		return
 	}

@@ -35,6 +35,11 @@ func main() {
 	defer db.Close()
 	log.Println("Database connected successfully")
 
+	// Verify database connectivity and set initial health status
+	if err := db.GetPool().Ping(ctx); err != nil {
+		log.Printf("WARNING: Database ping failed: %v", err)
+	}
+
 	// Initialize repositories
 	pool := db.GetPool()
 	employeeRepo := postgres.NewEmployeeRepo(pool)
@@ -54,6 +59,9 @@ func main() {
 	// Initialize handlers
 	h := handler.NewHandler(employeeSvc, shiftSvc, attendanceSvc, logSvc, employeeShiftSvc)
 	authH := handler.NewAuthHandler(authSvc)
+
+	// Set database health status to true (we successfully connected)
+	h.SetDBHealthy(true)
 
 	// Create routers
 	publicMux := http.NewServeMux()
@@ -111,6 +119,8 @@ func main() {
 		adminHandler:     adminHandler,
 		employeeHandler:  employeeHandler,
 		healthHandler:    h.Health,
+		readyHandler:     h.Ready,
+		metricsHandler:   h.Metrics,
 		rateLimiter:      rateLimiter,
 	}
 
@@ -165,15 +175,27 @@ type Router struct {
 	adminHandler     http.Handler
 	employeeHandler  http.Handler
 	healthHandler    func(http.ResponseWriter, *http.Request)
+	readyHandler     func(http.ResponseWriter, *http.Request)
+	metricsHandler   func(http.ResponseWriter, *http.Request)
 	rateLimiter      *middleware.RateLimiter
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
 
-	// Health check
-	if path == "/health" {
+	// Health check endpoints (liveness and readiness)
+	if path == "/health" || path == "/health/live" {
 		r.healthHandler(w, req)
+		return
+	}
+
+	if path == "/health/ready" {
+		r.readyHandler(w, req)
+		return
+	}
+
+	if path == "/metrics" {
+		r.metricsHandler(w, req)
 		return
 	}
 

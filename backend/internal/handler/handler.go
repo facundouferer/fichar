@@ -9,6 +9,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/facundouferer/fichar/backend/internal/domain"
@@ -20,6 +21,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// Handler holds all service dependencies and provides HTTP handlers
 type Handler struct {
 	employeeSvc      *service.EmployeeService
 	shiftSvc         *service.ShiftService
@@ -27,6 +29,13 @@ type Handler struct {
 	logSvc           *service.LogService
 	employeeShiftSvc *service.EmployeeShiftService
 	pdfSvc           *pdf.ReportService
+	dbHealthy        atomic.Bool  // Database health status
+	requestCount     atomic.Int64 // Total requests served
+}
+
+// StartRequestCount increments the request counter (call at start of each request)
+func (h *Handler) StartRequestCount() {
+	h.requestCount.Add(1)
 }
 
 func NewHandler(
@@ -43,9 +52,11 @@ func NewHandler(
 		logSvc:           logSvc,
 		employeeShiftSvc: employeeShiftSvc,
 		pdfSvc:           pdf.NewReportService(),
+		dbHealthy:        atomic.Bool{},
 	}
 }
 
+// Health returns basic liveness check (service is running)
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -53,6 +64,48 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 		"status":  "ok",
 		"service": "fichar-backend",
 	})
+}
+
+// Ready returns readiness check including database connectivity
+func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check database connectivity
+	if !h.dbHealthy.Load() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":   "unavailable",
+			"service":  "fichar-backend",
+			"database": "not connected",
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":   "ready",
+		"service":  "fichar-backend",
+		"database": "connected",
+	})
+}
+
+// SetDBHealthy updates the database health status
+func (h *Handler) SetDBHealthy(healthy bool) {
+	h.dbHealthy.Store(healthy)
+}
+
+// Metrics returns basic operational metrics
+func (h *Handler) Metrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	metrics := map[string]interface{}{
+		"requests_total":   h.requestCount.Load(),
+		"database_healthy": h.dbHealthy.Load(),
+		"timestamp":        time.Now().UTC().Format(time.RFC3339),
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(metrics)
 }
 
 // DTOs

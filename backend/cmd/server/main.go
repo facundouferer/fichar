@@ -91,6 +91,7 @@ func main() {
 	adminMux.HandleFunc("GET /api/reports/late-arrivals", h.GetLateArrivalsReport)
 	adminMux.HandleFunc("GET /api/reports/overtime", h.GetOvertimeReport)
 	adminMux.HandleFunc("GET /api/reports/dashboard", h.GetDashboardSummary)
+	adminMux.HandleFunc("GET /api/reports/monthly/export-pdf", h.ExportMonthlyReport)
 
 	// Apply auth middleware
 	authMiddleware := middleware.AuthMiddleware(authSvc)

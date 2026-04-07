@@ -15,6 +15,7 @@ import (
 	"github.com/facundouferer/fichar/backend/internal/middleware"
 	"github.com/facundouferer/fichar/backend/internal/repository/postgres"
 	"github.com/facundouferer/fichar/backend/internal/service"
+	"github.com/facundouferer/fichar/backend/pkg/pdf"
 	"github.com/google/uuid"
 )
 
@@ -24,6 +25,7 @@ type Handler struct {
 	attendanceSvc    *service.AttendanceService
 	logSvc           *service.LogService
 	employeeShiftSvc *service.EmployeeShiftService
+	pdfSvc           *pdf.ReportService
 }
 
 func NewHandler(
@@ -39,6 +41,7 @@ func NewHandler(
 		attendanceSvc:    attendanceSvc,
 		logSvc:           logSvc,
 		employeeShiftSvc: employeeShiftSvc,
+		pdfSvc:           pdf.NewReportService(),
 	}
 }
 
@@ -1305,6 +1308,59 @@ func calculateLateMinutes(checkIn, shiftStart string) int {
 		return 0
 	}
 	return int(diff.Minutes())
+}
+
+// ExportMonthlyReport exports the monthly report as a PDF
+func (h *Handler) ExportMonthlyReport(w http.ResponseWriter, r *http.Request) {
+	employeeID := r.URL.Query().Get("employee_id")
+	yearStr := r.URL.Query().Get("year")
+	monthStr := r.URL.Query().Get("month")
+
+	if employeeID == "" {
+		http.Error(w, "employee_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if yearStr == "" || monthStr == "" {
+		http.Error(w, "year and month are required", http.StatusBadRequest)
+		return
+	}
+
+	year, _ := strconv.Atoi(yearStr)
+	month, _ := strconv.Atoi(monthStr)
+
+	// Get employee info
+	emp, err := h.employeeSvc.GetByID(r.Context(), employeeID)
+	if err != nil {
+		http.Error(w, "Employee not found", http.StatusNotFound)
+		return
+	}
+
+	// Calculate monthly summary
+	summary, err := h.attendanceSvc.CalculateMonthlySummary(r.Context(), employeeID, year, month)
+	if err != nil {
+		http.Error(w, "Failed to calculate monthly report", http.StatusInternalServerError)
+		return
+	}
+
+	// Generate PDF
+	pdfBytes, err := h.pdfSvc.GenerateMonthlyReport(emp, summary)
+	if err != nil {
+		log.Printf("Error generating PDF: %v", err)
+		http.Error(w, "Failed to generate PDF", http.StatusInternalServerError)
+		return
+	}
+
+	// Set headers for PDF download
+	monthName := []string{"Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"}
+	filename := fmt.Sprintf("informe_%s_%s_%d.pdf", emp.LastName, monthName[month-1], year)
+
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(pdfBytes)))
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(pdfBytes)
 }
 
 // Helper function to generate UUID

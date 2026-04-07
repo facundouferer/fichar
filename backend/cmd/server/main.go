@@ -85,6 +85,13 @@ func main() {
 	employeeMux.HandleFunc("GET /api/employees/{id}", h.GetEmployee)
 	employeeMux.HandleFunc("GET /api/employees/{id}/attendances", h.GetEmployeeAttendances)
 
+	// Report routes (ADMIN role required)
+	adminMux.HandleFunc("GET /api/reports/attendance", h.GetAttendanceReport)
+	adminMux.HandleFunc("GET /api/reports/monthly", h.GetMonthlyReport)
+	adminMux.HandleFunc("GET /api/reports/late-arrivals", h.GetLateArrivalsReport)
+	adminMux.HandleFunc("GET /api/reports/overtime", h.GetOvertimeReport)
+	adminMux.HandleFunc("GET /api/reports/dashboard", h.GetDashboardSummary)
+
 	// Apply auth middleware
 	authMiddleware := middleware.AuthMiddleware(authSvc)
 

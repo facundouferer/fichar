@@ -111,6 +111,22 @@ func (s *AttendanceService) GetByEmployeeAndMonth(ctx context.Context, employeeI
 	return s.repo.GetByEmployeeAndMonth(ctx, employeeID, year, month)
 }
 
+func (s *AttendanceService) GetByDateRange(ctx context.Context, startDate, endDate string) ([]*domain.Attendance, error) {
+	return s.repo.GetByDateRange(ctx, startDate, endDate)
+}
+
+func (s *AttendanceService) GetByEmployeeAndDateRange(ctx context.Context, employeeID, startDate, endDate string) ([]*domain.Attendance, error) {
+	return s.repo.GetByEmployeeAndDateRange(ctx, employeeID, startDate, endDate)
+}
+
+func (s *AttendanceService) GetLateArrivals(ctx context.Context, startDate, endDate string) ([]*domain.Attendance, error) {
+	return s.repo.GetLateArrivals(ctx, startDate, endDate)
+}
+
+func (s *AttendanceService) GetOvertimeHours(ctx context.Context, employeeID, startDate, endDate string, minHours float64) ([]*domain.Attendance, error) {
+	return s.repo.GetByEmployeeAndDateRangeWithOvertime(ctx, employeeID, startDate, endDate, minHours)
+}
+
 func (s *AttendanceService) Update(ctx context.Context, att *domain.Attendance) error {
 	return s.repo.Update(ctx, att)
 }

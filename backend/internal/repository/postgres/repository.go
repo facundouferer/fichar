@@ -283,6 +283,87 @@ func (r *AttendanceRepo) Delete(ctx context.Context, id string) error {
 	return err
 }
 
+func (r *AttendanceRepo) GetByDateRange(ctx context.Context, startDate, endDate string) ([]*domain.Attendance, error) {
+	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, created_at 
+		FROM attendances WHERE date >= $1::date AND date <= $2::date ORDER BY date ASC, employee_id ASC`
+	rows, err := r.pool.Query(ctx, query, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var attendances []*domain.Attendance
+	for rows.Next() {
+		var att domain.Attendance
+		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late, &att.CreatedAt); err != nil {
+			return nil, err
+		}
+		attendances = append(attendances, &att)
+	}
+	return attendances, nil
+}
+
+func (r *AttendanceRepo) GetByEmployeeAndDateRange(ctx context.Context, employeeID, startDate, endDate string) ([]*domain.Attendance, error) {
+	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, created_at 
+		FROM attendances WHERE employee_id = $1 AND date >= $2::date AND date <= $3::date ORDER BY date ASC`
+	rows, err := r.pool.Query(ctx, query, employeeID, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var attendances []*domain.Attendance
+	for rows.Next() {
+		var att domain.Attendance
+		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late, &att.CreatedAt); err != nil {
+			return nil, err
+		}
+		attendances = append(attendances, &att)
+	}
+	return attendances, nil
+}
+
+func (r *AttendanceRepo) GetLateArrivals(ctx context.Context, startDate, endDate string) ([]*domain.Attendance, error) {
+	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, created_at 
+		FROM attendances WHERE late = true AND date >= $1::date AND date <= $2::date ORDER BY date ASC, employee_id ASC`
+	rows, err := r.pool.Query(ctx, query, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var attendances []*domain.Attendance
+	for rows.Next() {
+		var att domain.Attendance
+		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late, &att.CreatedAt); err != nil {
+			return nil, err
+		}
+		attendances = append(attendances, &att)
+	}
+	return attendances, nil
+}
+
+func (r *AttendanceRepo) GetByEmployeeAndDateRangeWithOvertime(ctx context.Context, employeeID, startDate, endDate string, minHours float64) ([]*domain.Attendance, error) {
+	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, created_at 
+		FROM attendances WHERE employee_id = $1 AND date >= $2::date AND date <= $3::date 
+		AND worked_hours >= $4 ORDER BY date ASC`
+	rows, err := r.pool.Query(ctx, query, employeeID, startDate, endDate, minHours)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var attendances []*domain.Attendance
+	for rows.Next() {
+		var att domain.Attendance
+		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late, &att.CreatedAt); err != nil {
+			return nil, err
+		}
+		attendances = append(attendances, &att)
+	}
+	return attendances, nil
+}
+
 // LogRepository implementation
 
 type LogRepo struct {

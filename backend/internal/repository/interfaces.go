@@ -29,6 +29,10 @@ type AttendanceRepository interface {
 	GetByEmployeeAndDate(ctx context.Context, employeeID, date string) (*domain.Attendance, error)
 	GetByEmployeeID(ctx context.Context, employeeID string) ([]*domain.Attendance, error)
 	GetByEmployeeAndMonth(ctx context.Context, employeeID string, year int, month int) ([]*domain.Attendance, error)
+	GetByDateRange(ctx context.Context, startDate, endDate string) ([]*domain.Attendance, error)
+	GetByEmployeeAndDateRange(ctx context.Context, employeeID, startDate, endDate string) ([]*domain.Attendance, error)
+	GetLateArrivals(ctx context.Context, startDate, endDate string) ([]*domain.Attendance, error)
+	GetByEmployeeAndDateRangeWithOvertime(ctx context.Context, employeeID, startDate, endDate string, minHours float64) ([]*domain.Attendance, error)
 	Update(ctx context.Context, att *domain.Attendance) error
 	Delete(ctx context.Context, id string) error
 }

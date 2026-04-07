@@ -1,11 +1,18 @@
 # Build stage
 FROM node:22-alpine AS builder
 
+ARG PUBLIC_API_URL=http://backend:8080
+
 WORKDIR /app
 
+# Create .env file at build time with the arg value (Vite prefix required for Astro)
+RUN echo "VITE_PUBLIC_API_URL=${PUBLIC_API_URL}" > .env
+
+# Copy source files
 COPY . .
-RUN npm install
-RUN npm run build
+
+# Install dependencies and build
+RUN npm install && npm run build
 
 # Runtime stage
 FROM node:22-alpine AS runner

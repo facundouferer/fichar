@@ -17,6 +17,7 @@ import (
 	"github.com/facundouferer/fichar/backend/internal/service"
 	"github.com/facundouferer/fichar/backend/pkg/pdf"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Handler struct {
@@ -61,6 +62,7 @@ type CreateEmployeeRequest struct {
 	FirstName string `json:"first_name"`
 	LastName  string `json:"last_name"`
 	Role      string `json:"role"`
+	Password  string `json:"password,omitempty"`
 	ShiftID   string `json:"shift_id,omitempty"`
 }
 
@@ -154,10 +156,21 @@ func (h *Handler) CreateEmployee(w http.ResponseWriter, r *http.Request) {
 		FirstName:          req.FirstName,
 		LastName:           req.LastName,
 		Role:               domain.Role(req.Role),
-		PasswordHash:       "", // No password initially - must be set by admin or first login
+		PasswordHash:       "",
 		MustChangePassword: true,
 		CreatedAt:          now,
 		UpdatedAt:          now,
+	}
+
+	// Hash password if provided
+	if req.Password != "" {
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+			return
+		}
+		emp.PasswordHash = string(hashedPassword)
+		emp.MustChangePassword = false // If password provided, no need to change
 	}
 
 	if err := h.employeeSvc.Create(r.Context(), emp); err != nil {

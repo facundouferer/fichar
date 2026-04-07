@@ -1,0 +1,221 @@
+---
+import EmployeeLayout from '../../layouts/EmployeeLayout.astro';
+---
+
+<EmployeeLayout>
+  <div class="page">
+    <h1 class="page-title">Historial de Asistencias</h1>
+    <p class="page-subtitle">Tus registros de entrada y salida</p>
+
+    <div class="filters">
+      <div class="filter-group">
+        <label for="year">Año</label>
+        <select id="year"></select>
+      </div>
+      <div class="filter-group">
+        <label for="month">Mes</label>
+        <select id="month">
+          <option value="1">Enero</option>
+          <option value="2">Febrero</option>
+          <option value="3">Marzo</option>
+          <option value="4">Abril</option>
+          <option value="5">Mayo</option>
+          <option value="6">Junio</option>
+          <option value="7">Julio</option>
+          <option value="8">Agosto</option>
+          <option value="9">Septiembre</option>
+          <option value="10">Octubre</option>
+          <option value="11">Noviembre</option>
+          <option value="12">Diciembre</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="table-container">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Entrada</th>
+            <th>Salida</th>
+            <th>Horas</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody id="history-tbody">
+          <tr><td colspan="5" class="loading">Cargando...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</EmployeeLayout>
+
+<script>
+  import { auth, API_URL } from '../../config/api';
+
+  const yearSelect = document.getElementById('year') as HTMLSelectElement;
+  const monthSelect = document.getElementById('month') as HTMLSelectElement;
+  const tbody = document.getElementById('history-tbody');
+
+  // Set current year/month
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+
+  // Populate year select
+  for (let y = currentYear; y >= currentYear - 2; y--) {
+    const option = document.createElement('option');
+    option.value = y.toString();
+    option.textContent = y.toString();
+    yearSelect.appendChild(option);
+  }
+
+  monthSelect.value = currentMonth.toString();
+
+  async function loadHistory() {
+    const user = auth.getUser();
+    const token = auth.getToken();
+    if (!user || !token) {
+      window.location.href = '/login';
+      return;
+    }
+
+    const year = parseInt(yearSelect.value);
+    const month = parseInt(monthSelect.value);
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/employees/${user.id}/attendances?year=${year}&month=${month}`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      if (!response.ok) throw new Error('Error');
+
+      const data = await response.json();
+
+      // API returns summary with daily_details array
+      const attendances = data.daily_details || [];
+
+      if (attendances.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty">No hay registros para este período</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = attendances.map((att: any) => `
+        <tr>
+          <td>${att.date}</td>
+          <td>${att.check_in ? formatTime(att.check_in) : '-'}</td>
+          <td>${att.check_out ? formatTime(att.check_out) : '-'}</td>
+          <td>${att.worked_hours?.toFixed(1) || '-'}</td>
+          <td><span class="badge ${att.is_late ? 'late' : 'normal'}">${att.is_late ? 'Tarde' : 'Normal'}</span></td>
+        </tr>
+      `).join('');
+
+    } catch (e) {
+      tbody.innerHTML = '<tr><td colspan="5" class="error">Error al cargar historial</td></tr>';
+    }
+  }
+
+  function formatTime(timestamp: string): string {
+    if (!timestamp) return '-';
+    if (timestamp.includes('T')) {
+      return timestamp.split('T')[1].substring(0, 5);
+    }
+    if (timestamp.includes(' ')) {
+      return timestamp.split(' ')[1].substring(0, 5);
+    }
+    return timestamp.substring(0, 5);
+  }
+
+  yearSelect.addEventListener('change', loadHistory);
+  monthSelect.addEventListener('change', loadHistory);
+
+  loadHistory();
+</script>
+
+<style>
+  .page { max-width: 800px; margin: 0 auto; }
+
+  .page-title {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+  }
+
+  .page-subtitle {
+    color: #64748b;
+    margin: 0.5rem 0 2rem;
+  }
+
+  .filters {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+  }
+
+  .filter-group label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #374151;
+  }
+
+  .filter-group select {
+    padding: 0.5rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.5rem;
+    font-size: 1rem;
+    background: white;
+  }
+
+  .table-container {
+    background: white;
+    border-radius: 0.75rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    overflow: hidden;
+  }
+
+  .table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .table th, .table td {
+    padding: 1rem;
+    text-align: left;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .table th {
+    background: #f9fafb;
+    font-weight: 600;
+    color: #374151;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+  }
+
+  .badge.normal { background: #dcfce7; color: #16a34a; }
+  .badge.late { background: #fef3c7; color: #d97706; }
+
+  .loading, .empty, .error {
+    text-align: center;
+    color: #64748b;
+    padding: 2rem !important;
+  }
+
+  .error { color: #dc2626; }
+</style>

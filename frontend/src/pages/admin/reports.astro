@@ -1,0 +1,176 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+---
+
+<AdminLayout>
+  <div class="page">
+    <h1 class="page-title">Reportes</h1>
+    <p class="page-subtitle">Consultar informes del sistema</p>
+
+    <div class="report-tabs">
+      <button class="tab-btn active" data-tab="dashboard">Resumen</button>
+      <button class="tab-btn" data-tab="attendance">Asistencia</button>
+      <button class="tab-btn" data-tab="late">Tardanzas</button>
+      <button class="tab-btn" data-tab="overtime">Horas Extra</button>
+    </div>
+
+    <div class="filters" id="filters">
+      <div class="filter-group">
+        <label for="start-date">Desde</label>
+        <input type="date" id="start-date" value="2026-04-01" />
+      </div>
+      <div class="filter-group">
+        <label for="end-date">Hasta</label>
+        <input type="date" id="end-date" value="2026-04-30" />
+      </div>
+      <div class="filter-group employee-filter" style="display: none;">
+        <label for="employee-filter">Empleado</label>
+        <select id="employee-filter">
+          <option value="">Todos</option>
+        </select>
+      </div>
+      <button class="btn-primary" id="apply-filters">Aplicar</button>
+    </div>
+
+    <div class="report-content" id="report-content">
+      <div class="loading">Cargando...</div>
+    </div>
+  </div>
+</AdminLayout>
+
+<script>
+  import { api, auth } from '../../config/api';
+
+  const tabs = document.querySelectorAll('.tab-btn');
+  const content = document.getElementById('report-content');
+  const employeeFilter = document.getElementById('employee-filter') as HTMLSelectElement;
+  const filterContainer = document.querySelector('.employee-filter') as HTMLElement;
+  
+  let currentTab = 'dashboard';
+  let employees: any[] = [];
+
+  async function init() {
+    const token = auth.getToken();
+    if (!token) return;
+
+    employees = await api.getEmployees(token);
+    employeeFilter.innerHTML = `<option value="">Todos</option>` + 
+      employees.map(e => `<option value="${e.id}">${e.first_name} ${e.last_name}</option>`).join('');
+
+    loadReport();
+  }
+
+  async function loadReport() {
+    const token = auth.getToken();
+    if (!token) return;
+
+    const startDate = (document.getElementById('start-date') as HTMLInputElement).value;
+    const endDate = (document.getElementById('end-date') as HTMLInputElement).value;
+    const empFilter = employeeFilter.value;
+
+    content.innerHTML = '<div class="loading">Cargando...</div>';
+
+    try {
+      switch (currentTab) {
+        case 'dashboard':
+          filterContainer.style.display = 'none';
+          const dash = await api.getDashboardSummary(token);
+          content.innerHTML = renderDashboard(dash);
+          break;
+          
+        case 'attendance':
+          filterContainer.style.display = 'block';
+          const att = await api.getAttendanceReport(token, startDate, endDate, empFilter || undefined);
+          content.innerHTML = renderTable('Asistencia', ['Fecha', 'Empleado', 'DNI', 'Entrada', 'Salida', 'Horas', 'Estado'], 
+            att.length ? att.map(r => [r.date, r.employee_name, r.dni, r.check_in || '-', r.check_out || '-', r.worked_hours.toFixed(1), r.is_late ? 'Tarde' : 'Normal']) : []);
+          break;
+          
+        case 'late':
+          filterContainer.style.display = 'none';
+          const late = await api.getLateArrivalsReport(token, startDate, endDate);
+          content.innerHTML = renderTable('Tardanzas', ['Fecha', 'Empleado', 'DNI', 'Entrada', 'Minutos Tarde'],
+            late.length ? late.map(r => [r.date, r.employee_name, r.dni, r.check_in, r.late_minutes.toString()]) : []);
+          break;
+          
+        case 'overtime':
+          filterContainer.style.display = 'block';
+          const ot = await api.getOvertimeReport(token, startDate, endDate, empFilter || undefined);
+          content.innerHTML = renderTable('Horas Extra', ['Fecha', 'Empleado', 'DNI', 'Horas Trab.', 'Horas Extra'],
+            ot.length ? ot.map(r => [r.date, r.employee_name, r.dni, r.worked_hours.toFixed(1), r.overtime_hours.toFixed(1)]) : []);
+          break;
+      }
+    } catch (e: any) {
+      content.innerHTML = `<div class="error">Error: ${e.message}</div>`;
+    }
+  }
+
+  function renderDashboard(data: any): string {
+    return `
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-value">${data.total_employees}</div><div class="stat-label">Total Empleados</div></div>
+        <div class="stat-card"><div class="stat-value">${data.present_today}</div><div class="stat-label">Presentes Hoy</div></div>
+        <div class="stat-card"><div class="stat-value">${data.absent_today}</div><div class="stat-label">Ausentes Hoy</div></div>
+        <div class="stat-card"><div class="stat-value">${data.late_arrivals_today}</div><div class="stat-label">Tardanzas Hoy</div></div>
+        <div class="stat-card"><div class="stat-value">${data.total_worked_hours.toFixed(1)}</div><div class="stat-label">Horas Totales</div></div>
+        <div class="stat-card"><div class="stat-value">${data.total_overtime_hours.toFixed(1)}</div><div class="stat-label">Horas Extra</div></div>
+      </div>
+    `;
+  }
+
+  function renderTable(title: string, headers: string[], rows: any[][]): string {
+    if (rows.length === 0) return `<div class="empty">No hay datos para el período seleccionado</div>`;
+    
+    return `
+      <div class="table-container">
+        <table class="table">
+          <thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+          <tbody>${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      currentTab = tab.getAttribute('data-tab');
+      loadReport();
+    });
+  });
+
+  document.getElementById('apply-filters').addEventListener('click', loadReport);
+
+  init();
+</script>
+
+<style>
+  .page { max-width: 1200px; }
+  .page-title { font-size: 1.75rem; font-weight: 700; color: #1e293b; margin: 0; }
+  .page-subtitle { color: #64748b; margin: 0.5rem 0 2rem; }
+  
+  .report-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+  .tab-btn { padding: 0.625rem 1rem; background: white; border: 1px solid #e5e7eb; border-radius: 0.5rem; font-weight: 500; cursor: pointer; color: #64748b; }
+  .tab-btn:hover { border-color: #3b82f6; }
+  .tab-btn.active { background: #3b82f6; color: white; border-color: #3b82f6; }
+  
+  .filters { display: flex; gap: 1rem; align-items: flex-end; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .filter-group { display: flex; flex-direction: column; gap: 0.375rem; }
+  .filter-group label { font-size: 0.875rem; font-weight: 500; color: #374151; }
+  .filter-group input, .filter-group select { padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.5rem; }
+  
+  .btn-primary { padding: 0.625rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 0.5rem; font-weight: 600; cursor: pointer; }
+  
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; }
+  .stat-card { background: white; padding: 1.5rem; border-radius: 0.75rem; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .stat-value { font-size: 1.75rem; font-weight: 700; color: #1e293b; }
+  .stat-label { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
+  
+  .table-container { background: white; border-radius: 0.75rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden; }
+  .table { width: 100%; border-collapse: collapse; }
+  .table th, .table td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
+  .table th { background: #f9fafb; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
+  
+  .loading, .empty, .error { padding: 2rem; text-align: center; color: #64748b; }
+  .error { color: #dc2626; }
+</style>

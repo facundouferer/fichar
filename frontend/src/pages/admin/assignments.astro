@@ -1,0 +1,195 @@
+---
+import AdminLayout from '../../layouts/AdminLayout.astro';
+---
+
+<AdminLayout>
+  <div class="page">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Asignaciones de Turno</h1>
+        <p class="page-subtitle">Asignar turnos a empleados</p>
+      </div>
+      <button class="btn-primary" id="add-btn">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        Nueva Asignación
+      </button>
+    </div>
+
+    <div class="table-container">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Empleado</th>
+            <th>Turno</th>
+            <th>Fecha Inicio</th>
+            <th>Fecha Fin</th>
+          </tr>
+        </thead>
+        <tbody id="assignments-tbody">
+          <tr><td colspan="4" class="loading-cell">Cargando...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Nueva Asignación</h2>
+        <button class="modal-close" id="close-modal">&times;</button>
+      </div>
+      <form id="assignment-form" class="modal-form">
+        <div class="form-group">
+          <label for="employee_id">Empleado</label>
+          <select id="employee_id" required></select>
+        </div>
+        
+        <div class="form-group">
+          <label for="shift_id">Turno</label>
+          <select id="shift_id" required></select>
+        </div>
+        
+        <div class="form-group">
+          <label for="start_date">Fecha Inicio</label>
+          <input type="date" id="start_date" required />
+        </div>
+        
+        <div class="form-group">
+          <label for="end_date">Fecha Fin (opcional)</label>
+          <input type="date" id="end_date" />
+        </div>
+        
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="cancel-btn">Cancelar</button>
+          <button type="submit" class="btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</AdminLayout>
+
+<script>
+  import { api, auth } from '../../config/api';
+
+  const modal = document.getElementById('modal');
+  const form = document.getElementById('assignment-form') as HTMLFormElement;
+  const tbody = document.getElementById('assignments-tbody');
+  const employeeSelect = document.getElementById('employee_id') as HTMLSelectElement;
+  const shiftSelect = document.getElementById('shift_id') as HTMLSelectElement;
+
+  let employees: any[] = [];
+  let shifts: any[] = [];
+
+  async function loadData() {
+    const token = auth.getToken();
+    if (!token) return;
+
+    try {
+      [employees, shifts] = await Promise.all([api.getEmployees(token), api.getShifts(token)]);
+      
+      employeeSelect.innerHTML = employees.map(e => `<option value="${e.id}">${e.first_name} ${e.last_name}</option>`).join('');
+      shiftSelect.innerHTML = shifts.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+      
+      await loadAssignments();
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="4" class="error-cell">Error al cargar datos</td></tr>`;
+    }
+  }
+
+  async function loadAssignments() {
+    const token = auth.getToken();
+    if (!token) return;
+
+    try {
+      const allAssignments = [];
+      for (const emp of employees) {
+        const assignments = await api.getEmployeeShifts(token, emp.id);
+        for (const a of assignments) {
+          const shift = shifts.find(s => s.id === a.shift_id);
+          a.employee_name = `${emp.first_name} ${emp.last_name}`;
+          a.shift_name = shift?.name || '-';
+          allAssignments.push(a);
+        }
+      }
+      
+      if (allAssignments.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" class="empty-cell">No hay asignaciones</td></tr>`;
+      } else {
+        tbody.innerHTML = allAssignments.map(a => `
+          <tr>
+            <td>${a.employee_name}</td>
+            <td>${a.shift_name}</td>
+            <td>${a.start_date}</td>
+            <td>${a.end_date || 'Activo'}</td>
+          </tr>
+        `).join('');
+      }
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="4" class="error-cell">Error al cargar asignaciones</td></tr>`;
+    }
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const token = auth.getToken();
+    if (!token) return;
+
+    const endDate = (document.getElementById('end_date') as HTMLInputElement).value || undefined;
+    
+    try {
+      await api.assignShift(token, {
+        employee_id: employeeSelect.value,
+        shift_id: shiftSelect.value,
+        start_date: (document.getElementById('start_date') as HTMLInputElement).value,
+        end_date: endDate,
+      });
+      closeModal();
+      await loadAssignments();
+    } catch (err: any) { alert(err.message || 'Error'); }
+  });
+
+  function openModal() {
+    modal.classList.add('active');
+  }
+
+  function closeModal() {
+    modal.classList.remove('active');
+    form.reset();
+  }
+
+  document.getElementById('add-btn').addEventListener('click', openModal);
+  document.getElementById('close-modal').addEventListener('click', closeModal);
+  document.getElementById('cancel-btn').addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+  loadData();
+</script>
+
+<style>
+  .page { max-width: 1200px; }
+  .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2rem; }
+  .page-title { font-size: 1.75rem; font-weight: 700; color: #1e293b; margin: 0; }
+  .page-subtitle { color: #64748b; margin: 0.5rem 0 0; }
+  .btn-primary { display: flex; align-items: center; gap: 0.5rem; padding: 0.625rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 0.5rem; font-weight: 600; cursor: pointer; }
+  .table-container { background: white; border-radius: 0.75rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden; }
+  .table { width: 100%; border-collapse: collapse; }
+  .table th, .table td { padding: 1rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
+  .table th { background: #f9fafb; font-weight: 600; color: #374151; font-size: 0.75rem; text-transform: uppercase; }
+  .loading-cell, .error-cell, .empty-cell { text-align: center; color: #64748b; padding: 2rem !important; }
+  
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 100; }
+  .modal-overlay.active { display: flex; }
+  .modal { background: white; border-radius: 0.75rem; width: 100%; max-width: 400px; padding: 1.5rem; }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+  .modal-title { font-size: 1.25rem; font-weight: 600; margin: 0; }
+  .modal-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #64748b; }
+  .modal-form { display: flex; flex-direction: column; gap: 1rem; }
+  .form-group { display: flex; flex-direction: column; gap: 0.375rem; }
+  .form-group label { font-size: 0.875rem; font-weight: 500; color: #374151; }
+  .form-group input, .form-group select { padding: 0.625rem; border: 1px solid #d1d5db; border-radius: 0.5rem; font-size: 1rem; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
+  .btn-secondary { padding: 0.625rem 1rem; background: white; color: #374151; border: 1px solid #d1d5db; border-radius: 0.5rem; font-weight: 500; cursor: pointer; }
+</style>

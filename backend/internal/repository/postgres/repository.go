@@ -23,24 +23,24 @@ func NewEmployeeRepo(pool *pgxpool.Pool) *EmployeeRepo {
 
 func (r *EmployeeRepo) Create(ctx context.Context, emp *domain.Employee) error {
 	query := `
-		INSERT INTO employees (id, dni, first_name, last_name, role, password_hash, must_change_password, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO employees (id, dni, first_name, last_name, role, password_hash, must_change_password, daily_hours, monthly_hours, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
 	_, err := r.pool.Exec(ctx, query,
 		emp.ID, emp.DNI, emp.FirstName, emp.LastName, emp.Role, emp.PasswordHash,
-		emp.MustChangePassword, emp.CreatedAt, emp.UpdatedAt)
+		emp.MustChangePassword, emp.DailyHours, emp.MonthlyHours, emp.CreatedAt, emp.UpdatedAt)
 	return err
 }
 
 func (r *EmployeeRepo) GetByID(ctx context.Context, id string) (*domain.Employee, error) {
 	query := `
-		SELECT id, dni, first_name, last_name, role, password_hash, must_change_password, created_at, updated_at
+		SELECT id, dni, first_name, last_name, role, password_hash, must_change_password, daily_hours, monthly_hours, created_at, updated_at
 		FROM employees WHERE id = $1
 	`
 	var emp domain.Employee
 	err := r.pool.QueryRow(ctx, query, id).Scan(
 		&emp.ID, &emp.DNI, &emp.FirstName, &emp.LastName, &emp.Role,
-		&emp.PasswordHash, &emp.MustChangePassword, &emp.CreatedAt, &emp.UpdatedAt)
+		&emp.PasswordHash, &emp.MustChangePassword, &emp.DailyHours, &emp.MonthlyHours, &emp.CreatedAt, &emp.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -49,13 +49,13 @@ func (r *EmployeeRepo) GetByID(ctx context.Context, id string) (*domain.Employee
 
 func (r *EmployeeRepo) GetByDNI(ctx context.Context, dni string) (*domain.Employee, error) {
 	query := `
-		SELECT id, dni, first_name, last_name, role, password_hash, must_change_password, created_at, updated_at
+		SELECT id, dni, first_name, last_name, role, password_hash, must_change_password, daily_hours, monthly_hours, created_at, updated_at
 		FROM employees WHERE dni = $1
 	`
 	var emp domain.Employee
 	err := r.pool.QueryRow(ctx, query, dni).Scan(
 		&emp.ID, &emp.DNI, &emp.FirstName, &emp.LastName, &emp.Role,
-		&emp.PasswordHash, &emp.MustChangePassword, &emp.CreatedAt, &emp.UpdatedAt)
+		&emp.PasswordHash, &emp.MustChangePassword, &emp.DailyHours, &emp.MonthlyHours, &emp.CreatedAt, &emp.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func (r *EmployeeRepo) GetByDNI(ctx context.Context, dni string) (*domain.Employ
 
 func (r *EmployeeRepo) List(ctx context.Context) ([]*domain.Employee, error) {
 	query := `
-		SELECT id, dni, first_name, last_name, role, password_hash, must_change_password, created_at, updated_at
+		SELECT id, dni, first_name, last_name, role, password_hash, must_change_password, daily_hours, monthly_hours, created_at, updated_at
 		FROM employees ORDER BY created_at DESC
 	`
 	rows, err := r.pool.Query(ctx, query)
@@ -78,7 +78,7 @@ func (r *EmployeeRepo) List(ctx context.Context) ([]*domain.Employee, error) {
 		var emp domain.Employee
 		if err := rows.Scan(
 			&emp.ID, &emp.DNI, &emp.FirstName, &emp.LastName, &emp.Role,
-			&emp.PasswordHash, &emp.MustChangePassword, &emp.CreatedAt, &emp.UpdatedAt); err != nil {
+			&emp.PasswordHash, &emp.MustChangePassword, &emp.DailyHours, &emp.MonthlyHours, &emp.CreatedAt, &emp.UpdatedAt); err != nil {
 			return nil, err
 		}
 		employees = append(employees, &emp)
@@ -92,11 +92,11 @@ func (r *EmployeeRepo) List(ctx context.Context) ([]*domain.Employee, error) {
 func (r *EmployeeRepo) Update(ctx context.Context, emp *domain.Employee) error {
 	query := `
 		UPDATE employees SET dni = $2, first_name = $3, last_name = $4, role = $5, 
-			password_hash = $6, must_change_password = $7, updated_at = $8 WHERE id = $1
+			password_hash = $6, must_change_password = $7, daily_hours = $8, monthly_hours = $9, updated_at = $10 WHERE id = $1
 	`
 	_, err := r.pool.Exec(ctx, query,
 		emp.ID, emp.DNI, emp.FirstName, emp.LastName, emp.Role,
-		emp.PasswordHash, emp.MustChangePassword, emp.UpdatedAt)
+		emp.PasswordHash, emp.MustChangePassword, emp.DailyHours, emp.MonthlyHours, emp.UpdatedAt)
 	return err
 }
 

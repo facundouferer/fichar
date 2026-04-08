@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS employees (
     role VARCHAR(20) NOT NULL CHECK (role IN ('ADMIN', 'EMPLOYEE')),
     password_hash VARCHAR(255) NOT NULL,
     must_change_password BOOLEAN DEFAULT TRUE,
+    daily_hours NUMERIC(4,2) DEFAULT 8.0,
+    monthly_hours NUMERIC(5,2) DEFAULT 160.0,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );

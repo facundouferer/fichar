@@ -136,7 +136,9 @@ func (s *AttendanceService) Delete(ctx context.Context, id string) error {
 }
 
 // CalculateMonthlySummary calculates the monthly attendance summary for an employee
-func (s *AttendanceService) CalculateMonthlySummary(ctx context.Context, employeeID string, year, month int) (*domain.MonthlySummary, error) {
+// If emp is provided and has custom hours set (DailyHours > 0 or MonthlyHours > 0),
+// those will override the shift-based calculation
+func (s *AttendanceService) CalculateMonthlySummary(ctx context.Context, employeeID string, year, month int, emp *domain.Employee) (*domain.MonthlySummary, error) {
 	// Get attendances for the month
 	attendances, err := s.repo.GetByEmployeeAndMonth(ctx, employeeID, year, month)
 	if err != nil {
@@ -160,13 +162,29 @@ func (s *AttendanceService) CalculateMonthlySummary(ctx context.Context, employe
 
 	// Calculate working days in the month (excluding weekends)
 	totalDays := countWorkingDays(year, month)
+
+	// Determine expected hours - use employee custom hours if set, otherwise fall back to shift
 	expectedHours := 0.0
-	for _, assignment := range shiftAssignments {
-		// Calculate overlap days with the month
-		shift := shiftMap[assignment.ShiftID]
-		if shift != nil {
-			days := calculateShiftDaysInMonth(assignment, year, month)
-			expectedHours += float64(days) * shift.ExpectedHours
+	var useCustomHours bool
+
+	if emp != nil && (emp.DailyHours > 0 || emp.MonthlyHours > 0) {
+		// Use employee's custom hours
+		useCustomHours = true
+		if emp.MonthlyHours > 0 {
+			expectedHours = emp.MonthlyHours
+		} else if emp.DailyHours > 0 {
+			// Calculate monthly hours from daily hours
+			expectedHours = emp.DailyHours * float64(totalDays)
+		}
+	} else {
+		// Use shift-based calculation
+		for _, assignment := range shiftAssignments {
+			// Calculate overlap days with the month
+			shift := shiftMap[assignment.ShiftID]
+			if shift != nil {
+				days := calculateShiftDaysInMonth(assignment, year, month)
+				expectedHours += float64(days) * shift.ExpectedHours
+			}
 		}
 	}
 
@@ -184,14 +202,23 @@ func (s *AttendanceService) CalculateMonthlySummary(ctx context.Context, employe
 
 		shiftName := ""
 		expected := 0.0
-		// Find the shift for this day
-		for _, assignment := range shiftAssignments {
-			if isDateInRange(att.Date, assignment.StartDate, assignment.EndDate) {
-				shift := shiftMap[assignment.ShiftID]
-				if shift != nil {
-					shiftName = shift.Name
-					expected = shift.ExpectedHours
-					break
+
+		// Determine daily expected hours - use custom or shift-based
+		if useCustomHours {
+			// Use employee's custom daily hours
+			if emp.DailyHours > 0 {
+				expected = emp.DailyHours
+			}
+		} else {
+			// Find the shift for this day
+			for _, assignment := range shiftAssignments {
+				if isDateInRange(att.Date, assignment.StartDate, assignment.EndDate) {
+					shift := shiftMap[assignment.ShiftID]
+					if shift != nil {
+						shiftName = shift.Name
+						expected = shift.ExpectedHours
+						break
+					}
 				}
 			}
 		}

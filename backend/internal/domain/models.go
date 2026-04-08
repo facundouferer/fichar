@@ -19,6 +19,8 @@ type Employee struct {
 	Role               Role      `json:"role"`
 	PasswordHash       string    `json:"-"`
 	MustChangePassword bool      `json:"must_change_password"`
+	DailyHours         float64   `json:"daily_hours"`
+	MonthlyHours       float64   `json:"monthly_hours"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }

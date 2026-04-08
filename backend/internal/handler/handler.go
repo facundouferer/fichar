@@ -111,19 +111,23 @@ func (h *Handler) Metrics(w http.ResponseWriter, r *http.Request) {
 // DTOs
 
 type CreateEmployeeRequest struct {
-	DNI       string `json:"dni"`
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name"`
-	Role      string `json:"role"`
-	Password  string `json:"password,omitempty"`
-	ShiftID   string `json:"shift_id,omitempty"`
+	DNI          string  `json:"dni"`
+	FirstName    string  `json:"first_name"`
+	LastName     string  `json:"last_name"`
+	Role         string  `json:"role"`
+	Password     string  `json:"password,omitempty"`
+	ShiftID      string  `json:"shift_id,omitempty"`
+	DailyHours   float64 `json:"daily_hours"`
+	MonthlyHours float64 `json:"monthly_hours"`
 }
 
 type UpdateEmployeeRequest struct {
-	DNI       string `json:"dni,omitempty"`
-	FirstName string `json:"first_name,omitempty"`
-	LastName  string `json:"last_name,omitempty"`
-	Role      string `json:"role,omitempty"`
+	DNI          string  `json:"dni,omitempty"`
+	FirstName    string  `json:"first_name,omitempty"`
+	LastName     string  `json:"last_name,omitempty"`
+	Role         string  `json:"role,omitempty"`
+	DailyHours   float64 `json:"daily_hours,omitempty"`
+	MonthlyHours float64 `json:"monthly_hours,omitempty"`
 }
 
 type EmployeeResponse struct {
@@ -133,11 +137,23 @@ type EmployeeResponse struct {
 	LastName           string    `json:"last_name"`
 	Role               string    `json:"role"`
 	MustChangePassword bool      `json:"must_change_password"`
+	DailyHours         float64   `json:"daily_hours"`
+	MonthlyHours       float64   `json:"monthly_hours"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 func employeeToResponse(emp *domain.Employee) EmployeeResponse {
+	// Set default values if not set
+	dailyHours := emp.DailyHours
+	if dailyHours == 0 {
+		dailyHours = 8.0 // Default
+	}
+	monthlyHours := emp.MonthlyHours
+	if monthlyHours == 0 {
+		monthlyHours = 160.0 // Default (20 work days * 8 hours)
+	}
+
 	return EmployeeResponse{
 		ID:                 emp.ID,
 		DNI:                emp.DNI,
@@ -145,6 +161,8 @@ func employeeToResponse(emp *domain.Employee) EmployeeResponse {
 		LastName:           emp.LastName,
 		Role:               string(emp.Role),
 		MustChangePassword: emp.MustChangePassword,
+		DailyHours:         dailyHours,
+		MonthlyHours:       monthlyHours,
 		CreatedAt:          emp.CreatedAt,
 		UpdatedAt:          emp.UpdatedAt,
 	}
@@ -203,6 +221,17 @@ func (h *Handler) CreateEmployee(w http.ResponseWriter, r *http.Request) {
 
 	// Create employee
 	now := time.Now()
+
+	// Set default hours if not provided
+	dailyHours := req.DailyHours
+	if dailyHours == 0 {
+		dailyHours = 8.0
+	}
+	monthlyHours := req.MonthlyHours
+	if monthlyHours == 0 {
+		monthlyHours = 160.0
+	}
+
 	emp := &domain.Employee{
 		ID:                 generateUUID(),
 		DNI:                req.DNI,
@@ -211,6 +240,8 @@ func (h *Handler) CreateEmployee(w http.ResponseWriter, r *http.Request) {
 		Role:               domain.Role(req.Role),
 		PasswordHash:       "",
 		MustChangePassword: true,
+		DailyHours:         dailyHours,
+		MonthlyHours:       monthlyHours,
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
@@ -336,6 +367,13 @@ func (h *Handler) UpdateEmployee(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		emp.Role = domain.Role(req.Role)
+	}
+	// Update custom hours if provided (use 0 as "not set" to distinguish from actual 0)
+	if req.DailyHours > 0 {
+		emp.DailyHours = req.DailyHours
+	}
+	if req.MonthlyHours > 0 {
+		emp.MonthlyHours = req.MonthlyHours
 	}
 
 	emp.UpdatedAt = time.Now()
@@ -699,6 +737,13 @@ func (h *Handler) GetEmployeeAttendances(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Get employee for custom hours (if any)
+	emp, err := h.employeeSvc.GetByID(r.Context(), id)
+	if err != nil {
+		http.Error(w, "Employee not found", http.StatusNotFound)
+		return
+	}
+
 	// Check for year/month query params
 	year := r.URL.Query().Get("year")
 	month := r.URL.Query().Get("month")
@@ -708,7 +753,7 @@ func (h *Handler) GetEmployeeAttendances(w http.ResponseWriter, r *http.Request)
 		y, _ := strconv.Atoi(year)
 		m, _ := strconv.Atoi(month)
 
-		summary, err := h.attendanceSvc.CalculateMonthlySummary(r.Context(), id, y, m)
+		summary, err := h.attendanceSvc.CalculateMonthlySummary(r.Context(), id, y, m, emp)
 		if err != nil {
 			http.Error(w, "Failed to get monthly summary", http.StatusInternalServerError)
 			return
@@ -1082,18 +1127,19 @@ func (h *Handler) GetMonthlyReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	year, _ := strconv.Atoi(yearStr)
-	month, _ := strconv.Atoi(monthStr)
-
-	summary, err := h.attendanceSvc.CalculateMonthlySummary(r.Context(), employeeID, year, month)
-	if err != nil {
-		http.Error(w, "Failed to calculate monthly report", http.StatusInternalServerError)
-		return
-	}
-
+	// Get employee first to check for custom hours
 	emp, err := h.employeeSvc.GetByID(r.Context(), employeeID)
 	if err != nil {
 		http.Error(w, "Employee not found", http.StatusNotFound)
+		return
+	}
+
+	year, _ := strconv.Atoi(yearStr)
+	month, _ := strconv.Atoi(monthStr)
+
+	summary, err := h.attendanceSvc.CalculateMonthlySummary(r.Context(), employeeID, year, month, emp)
+	if err != nil {
+		http.Error(w, "Failed to calculate monthly report", http.StatusInternalServerError)
 		return
 	}
 
@@ -1403,7 +1449,7 @@ func (h *Handler) ExportMonthlyReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Calculate monthly summary
-	summary, err := h.attendanceSvc.CalculateMonthlySummary(r.Context(), employeeID, year, month)
+	summary, err := h.attendanceSvc.CalculateMonthlySummary(r.Context(), employeeID, year, month, emp)
 	if err != nil {
 		http.Error(w, "Failed to calculate monthly report", http.StatusInternalServerError)
 		return

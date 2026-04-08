@@ -92,7 +92,7 @@ func (m *mockAttendanceService) GetByEmployeeAndMonth(ctx context.Context, emplo
 	return nil, nil
 }
 
-func (m *mockAttendanceService) CalculateMonthlySummary(ctx context.Context, employeeID string, year, month int) (*domain.MonthlySummary, error) {
+func (m *mockAttendanceService) CalculateMonthlySummary(ctx context.Context, employeeID string, year, month int, emp *domain.Employee) (*domain.MonthlySummary, error) {
 	worked := 40.0
 	return &domain.MonthlySummary{
 		Year:          year,

@@ -135,6 +135,102 @@ func (s *AttendanceService) Delete(ctx context.Context, id string) error {
 	return s.repo.Delete(ctx, id)
 }
 
+// CorrectAttendance corrects an attendance record with new check-in/check-out times
+// Returns error if:
+// - Attendance not found
+// - Correction is beyond 7 days from the original date
+// - Check-in is after check-out
+// - No correction reason provided
+func (s *AttendanceService) CorrectAttendance(ctx context.Context, attendanceID, adminID, checkIn, checkOut, correctionReason, newDate string) (*domain.Attendance, error) {
+	// Get existing attendance
+	att, err := s.repo.GetByID(ctx, attendanceID)
+	if err != nil {
+		return nil, fmt.Errorf("attendance not found: %w", err)
+	}
+
+	// Parse the original date
+	originalDate, err := time.Parse("2006-01-02", att.Date)
+	if err != nil {
+		return nil, fmt.Errorf("invalid original date: %w", err)
+	}
+
+	// Check if correction is within 7 days
+	now := time.Now()
+	daysSinceOriginal := now.Sub(originalDate).Hours() / 24
+	if daysSinceOriginal > 7 {
+		return nil, fmt.Errorf("correction not allowed: records can only be corrected within 7 days (original: %s, days ago: %.1f)", att.Date, daysSinceOriginal)
+	}
+
+	// Parse check-in and check-out times
+	checkInTime, err := time.Parse("2006-01-02T15:04:05", checkIn)
+	if err != nil {
+		return nil, fmt.Errorf("invalid check-in format, use YYYY-MM-DDTHH:MM:SS: %w", err)
+	}
+
+	checkOutTime, err := time.Parse("2006-01-02T15:04:05", checkOut)
+	if err != nil {
+		return nil, fmt.Errorf("invalid check-out format, use YYYY-MM-DDTHH:MM:SS: %w", err)
+	}
+
+	// Validate check-in is before check-out
+	if !checkOutTime.After(checkInTime) {
+		return nil, fmt.Errorf("check-out must be after check-in")
+	}
+
+	// Validate correction reason is provided
+	if correctionReason == "" {
+		return nil, fmt.Errorf("correction reason is required")
+	}
+
+	// Calculate new worked hours
+	workedHours := checkOutTime.Sub(checkInTime).Hours()
+
+	// Get shift to determine if late
+	var isLate bool
+	assignments, err := s.empShiftSvc.GetByEmployeeAndMonth(ctx, att.EmployeeID, originalDate.Year(), int(originalDate.Month()))
+	if err == nil && len(assignments) > 0 {
+		for _, assign := range assignments {
+			if isDateInRange(att.Date, assign.StartDate, assign.EndDate) {
+				shift, err := s.shiftSvc.GetByID(ctx, assign.ShiftID)
+				if err == nil {
+					shiftStartHour, _ := time.Parse("15:04", shift.StartTime)
+					checkInHour, _ := time.Parse("15:04:05", checkIn[11:])
+					// Allow 15 minute tolerance
+					if checkInHour.After(shiftStartHour.Add(15 * time.Minute)) {
+						isLate = true
+					}
+				}
+				break
+			}
+		}
+	}
+
+	// Update attendance with correction
+	nowTime := time.Now()
+	checkInStr := checkIn
+	checkOutStr := checkOut
+	att.CheckIn = &checkInStr
+	att.CheckOut = &checkOutStr
+	workedHoursPtr := workedHours
+	att.WorkedHours = &workedHoursPtr
+	att.Late = isLate
+	att.Corrected = true
+	att.CorrectionReason = &correctionReason
+	att.CorrectedBy = &adminID
+	att.CorrectedAt = &nowTime
+
+	// If new date is provided and different, update it
+	if newDate != "" && newDate != att.Date {
+		att.Date = newDate
+	}
+
+	if err := s.repo.Update(ctx, att); err != nil {
+		return nil, fmt.Errorf("failed to update attendance: %w", err)
+	}
+
+	return att, nil
+}
+
 // CalculateMonthlySummary calculates the monthly attendance summary for an employee
 // If emp is provided and has custom hours set (DailyHours > 0 or MonthlyHours > 0),
 // those will override the shift-based calculation
@@ -224,19 +320,25 @@ func (s *AttendanceService) CalculateMonthlySummary(ctx context.Context, employe
 		}
 
 		daily := domain.DailySummary{
-			Date:          att.Date,
-			CheckIn:       "",
-			CheckOut:      "",
-			WorkedHours:   worked,
-			ExpectedHours: expected,
-			IsLate:        att.Late,
-			ShiftName:     shiftName,
+			Date:             att.Date,
+			CheckIn:          "",
+			CheckOut:         "",
+			WorkedHours:      worked,
+			ExpectedHours:    expected,
+			IsLate:           att.Late,
+			ShiftName:        shiftName,
+			IsRemote:         att.IsRemote,
+			Corrected:        att.Corrected,
+			CorrectionReason: "",
 		}
 		if att.CheckIn != nil {
 			daily.CheckIn = *att.CheckIn
 		}
 		if att.CheckOut != nil {
 			daily.CheckOut = *att.CheckOut
+		}
+		if att.Corrected && att.CorrectionReason != nil {
+			daily.CorrectionReason = *att.CorrectionReason
 		}
 		dailyDetails = append(dailyDetails, daily)
 

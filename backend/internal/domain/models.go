@@ -43,14 +43,19 @@ type EmployeeShiftAssignment struct {
 }
 
 type Attendance struct {
-	ID          string    `json:"id"`
-	EmployeeID  string    `json:"employee_id"`
-	Date        string    `json:"date"`
-	CheckIn     *string   `json:"check_in"`
-	CheckOut    *string   `json:"check_out"`
-	WorkedHours *float64  `json:"worked_hours"`
-	Late        bool      `json:"late"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID               string     `json:"id"`
+	EmployeeID       string     `json:"employee_id"`
+	Date             string     `json:"date"`
+	CheckIn          *string    `json:"check_in"`
+	CheckOut         *string    `json:"check_out"`
+	WorkedHours      *float64   `json:"worked_hours"`
+	Late             bool       `json:"late"`
+	IsRemote         bool       `json:"is_remote"`
+	Corrected        bool       `json:"corrected"`
+	CorrectionReason *string    `json:"correction_reason"`
+	CorrectedBy      *string    `json:"corrected_by"`
+	CorrectedAt      *time.Time `json:"corrected_at"`
+	CreatedAt        time.Time  `json:"created_at"`
 }
 
 type Log struct {
@@ -77,25 +82,31 @@ type MonthlySummary struct {
 }
 
 type DailySummary struct {
-	Date          string  `json:"date"`
-	CheckIn       string  `json:"check_in,omitempty"`
-	CheckOut      string  `json:"check_out,omitempty"`
-	WorkedHours   float64 `json:"worked_hours"`
-	ExpectedHours float64 `json:"expected_hours"`
-	IsLate        bool    `json:"is_late"`
-	ShiftName     string  `json:"shift_name,omitempty"`
+	Date             string  `json:"date"`
+	CheckIn          string  `json:"check_in,omitempty"`
+	CheckOut         string  `json:"check_out,omitempty"`
+	WorkedHours      float64 `json:"worked_hours"`
+	ExpectedHours    float64 `json:"expected_hours"`
+	IsLate           bool    `json:"is_late"`
+	ShiftName        string  `json:"shift_name,omitempty"`
+	IsRemote         bool    `json:"is_remote,omitempty"`
+	Corrected        bool    `json:"corrected,omitempty"`
+	CorrectionReason string  `json:"correction_reason,omitempty"`
 }
 
 type AttendanceReport struct {
-	EmployeeID   string  `json:"employee_id"`
-	EmployeeName string  `json:"employee_name"`
-	DNI          string  `json:"dni"`
-	Date         string  `json:"date"`
-	CheckIn      string  `json:"check_in,omitempty"`
-	CheckOut     string  `json:"check_out,omitempty"`
-	WorkedHours  float64 `json:"worked_hours"`
-	IsLate       bool    `json:"is_late"`
-	ShiftName    string  `json:"shift_name,omitempty"`
+	EmployeeID       string  `json:"employee_id"`
+	EmployeeName     string  `json:"employee_name"`
+	DNI              string  `json:"dni"`
+	Date             string  `json:"date"`
+	CheckIn          string  `json:"check_in,omitempty"`
+	CheckOut         string  `json:"check_out,omitempty"`
+	WorkedHours      float64 `json:"worked_hours"`
+	IsLate           bool    `json:"is_late"`
+	ShiftName        string  `json:"shift_name,omitempty"`
+	IsRemote         bool    `json:"is_remote,omitempty"`
+	Corrected        bool    `json:"corrected,omitempty"`
+	CorrectionReason string  `json:"correction_reason,omitempty"`
 }
 
 type LateArrivalReport struct {

@@ -47,6 +47,11 @@ CREATE TABLE IF NOT EXISTS attendances (
     check_out TIMESTAMP,
     worked_hours NUMERIC(4, 2),
     late BOOLEAN DEFAULT FALSE,
+    is_remote BOOLEAN DEFAULT FALSE,
+    corrected BOOLEAN DEFAULT FALSE,
+    correction_reason TEXT,
+    corrected_by UUID REFERENCES employees(id),
+    corrected_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 

@@ -36,6 +36,44 @@ import AdminLayout from '../../layouts/AdminLayout.astro';
       <div class="loading">Cargando...</div>
     </div>
   </div>
+
+  <!-- Correction Modal -->
+  <div class="modal-overlay" id="correction-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">Corregir Asistencia</h2>
+        <button class="modal-close" id="close-correction">&times;</button>
+      </div>
+      <form id="correction-form" class="modal-form">
+        <input type="hidden" id="correction-attendance-id" />
+        
+        <div class="form-group">
+          <label for="correction-date">Fecha</label>
+          <input type="date" id="correction-date" required />
+        </div>
+        
+        <div class="form-group">
+          <label for="correction-checkin">Hora de entrada</label>
+          <input type="time" id="correction-checkin" required />
+        </div>
+        
+        <div class="form-group">
+          <label for="correction-checkout">Hora de salida</label>
+          <input type="time" id="correction-checkout" required />
+        </div>
+        
+        <div class="form-group">
+          <label for="correction-reason">Motivo de corrección (requerido)</label>
+          <textarea id="correction-reason" rows="3" required placeholder="Ej: Empleado olvidó registrar salida"></textarea>
+        </div>
+        
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="cancel-correction">Cancelar</button>
+          <button type="submit" class="btn-primary">Guardar Corrección</button>
+        </div>
+      </form>
+    </div>
+  </div>
 </AdminLayout>
 
 <script>
@@ -81,8 +119,10 @@ import AdminLayout from '../../layouts/AdminLayout.astro';
         case 'attendance':
           filterContainer.style.display = 'block';
           const att = await api.getAttendanceReport(token, startDate, endDate, empFilter || undefined);
+          // Store for correction modal
+          attendanceData = att;
           content.innerHTML = renderTable('Asistencia', ['Fecha', 'Empleado', 'DNI', 'Entrada', 'Salida', 'Horas', 'Estado'], 
-            att.length ? att.map(r => [r.date, r.employee_name, r.dni, r.check_in || '-', r.check_out || '-', r.worked_hours.toFixed(1), r.is_late ? 'Tarde' : 'Normal']) : []);
+            att.length ? att.map(r => [r.date, r.employee_name, r.dni, r.check_in || '-', r.check_out || '-', r.worked_hours.toFixed(1), r.is_late ? 'Tarde' : 'Normal', r.id || '', r.corrected || false]) : []);
           break;
           
         case 'late':
@@ -123,12 +163,112 @@ import AdminLayout from '../../layouts/AdminLayout.astro';
     return `
       <div class="table-container">
         <table class="table">
-          <thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>
-          <tbody>${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody>
+          <thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}<th>Acciones</th></tr></thead>
+          <tbody>${rows.map((r, idx) => {
+            const isCorrected = r[7] === true;
+            return `<tr>${r.slice(0, 7).map(c => `<td>${c}</td>`).join('')}<td class="actions">
+              <button class="btn-icon correct-btn" data-idx="${idx}" title="Corregir">✏️</button>
+              ${isCorrected ? '<span class="badge-corrected" title="Corregido">✓</span>' : ''}
+            </td></tr>`;
+          }).join('')}</tbody>
         </table>
       </div>
     `;
   }
+
+  // Store current attendance data for correction
+  let attendanceData: any[] = [];
+
+  // Correction modal functions
+  const correctionModal = document.getElementById('correction-modal');
+  const correctionForm = document.getElementById('correction-form') as HTMLFormElement;
+  
+  function openCorrectionModal(attendanceId: string, date: string, checkIn: string, checkOut: string) {
+    (document.getElementById('correction-attendance-id') as HTMLInputElement).value = attendanceId;
+    (document.getElementById('correction-date') as HTMLInputElement).value = date;
+    
+    // Extract time from check-in/check-out if available
+    if (checkIn && checkIn !== '-') {
+      const inTime = checkIn.split('T')[1] || checkIn.split(' ')[1];
+      if (inTime) (document.getElementById('correction-checkin') as HTMLInputElement).value = inTime.substring(0, 5);
+    }
+    if (checkOut && checkOut !== '-') {
+      const outTime = checkOut.split('T')[1] || checkOut.split(' ')[1];
+      if (outTime) (document.getElementById('correction-checkout') as HTMLInputElement).value = outTime.substring(0, 5);
+    }
+    
+    (document.getElementById('correction-reason') as HTMLTextAreaElement).value = '';
+    correctionModal.classList.add('active');
+  }
+
+  // Handle correction button clicks using event delegation
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    if (target.classList.contains('correct-btn')) {
+      const idx = parseInt(target.getAttribute('data-idx') || '0');
+      const att = attendanceData[idx];
+      if (att) {
+        openCorrectionModal(att.id, att.date, att.check_in || '', att.check_out || '');
+      }
+    }
+  });
+
+  function closeCorrectionModal() {
+    correctionModal.classList.remove('active');
+  }
+
+  correctionForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const token = auth.getToken();
+    if (!token) return;
+
+    const attendanceId = (document.getElementById('correction-attendance-id') as HTMLInputElement).value;
+    const date = (document.getElementById('correction-date') as HTMLInputElement).value;
+    const checkInTime = (document.getElementById('correction-checkin') as HTMLInputElement).value;
+    const checkOutTime = (document.getElementById('correction-checkout') as HTMLInputElement).value;
+    const reason = (document.getElementById('correction-reason') as HTMLTextAreaElement).value;
+
+    if (!checkInTime || !checkOutTime || !reason) {
+      alert('Todos los campos son requeridos');
+      return;
+    }
+
+    const checkIn = `${date}T${checkInTime}:00`;
+    const checkOut = `${date}T${checkOutTime}:00`;
+
+    try {
+      const response = await fetch(`${(window as any).API_URL || 'http://localhost:8080'}/api/admin/attendances/${attendanceId}/correct`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          date: date,
+          check_in: checkIn,
+          check_out: checkOut,
+          correction_reason: reason
+        })
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.message || 'Error al corregir');
+      }
+
+      closeCorrectionModal();
+      alert('Asistencia corregida correctamente');
+      loadReport(); // Reload to show updated data
+    } catch (e: any) {
+      alert(e.message || 'Error al corregir asistencia');
+    }
+  });
+
+  document.getElementById('close-correction').addEventListener('click', closeCorrectionModal);
+  document.getElementById('cancel-correction').addEventListener('click', closeCorrectionModal);
+  correctionModal.addEventListener('click', (e) => {
+    if (e.target === correctionModal) closeCorrectionModal();
+  });
 
   tabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -170,6 +310,25 @@ import AdminLayout from '../../layouts/AdminLayout.astro';
   .table { width: 100%; border-collapse: collapse; }
   .table th, .table td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
   .table th { background: #f9fafb; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
+  
+  .actions { display: flex; align-items: center; gap: 0.5rem; }
+  .btn-icon { padding: 0.375rem; border: none; border-radius: 0.375rem; cursor: pointer; background: none; font-size: 1rem; }
+  .btn-icon:hover { background: #f3f4f6; }
+  .badge-corrected { color: #16a34a; font-weight: bold; }
+  
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 100; }
+  .modal-overlay.active { display: flex; }
+  .modal { background: white; border-radius: 0.75rem; width: 100%; max-width: 400px; padding: 1.5rem; }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+  .modal-title { font-size: 1.25rem; font-weight: 600; margin: 0; }
+  .modal-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #64748b; }
+  .modal-form { display: flex; flex-direction: column; gap: 1rem; }
+  .form-group { display: flex; flex-direction: column; gap: 0.375rem; }
+  .form-group label { font-size: 0.875rem; font-weight: 500; color: #374151; }
+  .form-group input, .form-group textarea { padding: 0.625rem; border: 1px solid #d1d5db; border-radius: 0.5rem; font-size: 1rem; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
+  .btn-secondary { padding: 0.625rem 1rem; background: white; color: #374151; border: 1px solid #d1d5db; border-radius: 0.5rem; font-weight: 500; cursor: pointer; }
+  .btn-secondary:hover { background: #f9fafb; }
   
   .loading, .empty, .error { padding: 2rem; text-align: center; color: #64748b; }
   .error { color: #dc2626; }

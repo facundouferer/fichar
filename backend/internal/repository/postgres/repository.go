@@ -181,19 +181,21 @@ func NewAttendanceRepo(pool *pgxpool.Pool) *AttendanceRepo {
 
 func (r *AttendanceRepo) Create(ctx context.Context, att *domain.Attendance) error {
 	query := `
-		INSERT INTO attendances (id, employee_id, date, check_in, check_out, worked_hours, late, created_at)
-		VALUES ($1, $2, $3::date, $4::timestamp, $5::timestamp, $6, $7, $8)
+		INSERT INTO attendances (id, employee_id, date, check_in, check_out, worked_hours, late, is_remote, corrected, correction_reason, corrected_by, corrected_at, created_at)
+		VALUES ($1, $2, $3::date, $4::timestamp, $5::timestamp, $6, $7, $8, $9, $10, $11, $12, $13)
 	`
 	_, err := r.pool.Exec(ctx, query,
-		att.ID, att.EmployeeID, att.Date, att.CheckIn, att.CheckOut, att.WorkedHours, att.Late, att.CreatedAt)
+		att.ID, att.EmployeeID, att.Date, att.CheckIn, att.CheckOut, att.WorkedHours, att.Late,
+		att.IsRemote, att.Corrected, att.CorrectionReason, att.CorrectedBy, att.CorrectedAt, att.CreatedAt)
 	return err
 }
 
 func (r *AttendanceRepo) GetByID(ctx context.Context, id string) (*domain.Attendance, error) {
-	query := `SELECT id, employee_id, date, check_in, check_out, worked_hours, late, created_at FROM attendances WHERE id = $1`
+	query := `SELECT id, employee_id, date, check_in, check_out, worked_hours, late, is_remote, corrected, correction_reason, corrected_by, corrected_at, created_at FROM attendances WHERE id = $1`
 	var att domain.Attendance
 	err := r.pool.QueryRow(ctx, query, id).Scan(
-		&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late, &att.CreatedAt)
+		&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late,
+		&att.IsRemote, &att.Corrected, &att.CorrectionReason, &att.CorrectedBy, &att.CorrectedAt, &att.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -201,11 +203,12 @@ func (r *AttendanceRepo) GetByID(ctx context.Context, id string) (*domain.Attend
 }
 
 func (r *AttendanceRepo) GetByEmployeeAndDate(ctx context.Context, employeeID, date string) (*domain.Attendance, error) {
-	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, created_at 
+	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, is_remote, corrected, correction_reason, corrected_by, corrected_at, created_at 
 		FROM attendances WHERE employee_id = $1 AND date = $2::date`
 	var att domain.Attendance
 	err := r.pool.QueryRow(ctx, query, employeeID, date).Scan(
-		&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late, &att.CreatedAt)
+		&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late,
+		&att.IsRemote, &att.Corrected, &att.CorrectionReason, &att.CorrectedBy, &att.CorrectedAt, &att.CreatedAt)
 	if err != nil {
 		// Check if it's a "no rows" error
 		if strings.Contains(err.Error(), "no rows") {
@@ -217,7 +220,7 @@ func (r *AttendanceRepo) GetByEmployeeAndDate(ctx context.Context, employeeID, d
 }
 
 func (r *AttendanceRepo) GetByEmployeeID(ctx context.Context, employeeID string) ([]*domain.Attendance, error) {
-	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, created_at 
+	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, is_remote, corrected, correction_reason, corrected_by, corrected_at, created_at 
 		FROM attendances WHERE employee_id = $1 ORDER BY date DESC`
 	rows, err := r.pool.Query(ctx, query, employeeID)
 	if err != nil {
@@ -228,7 +231,8 @@ func (r *AttendanceRepo) GetByEmployeeID(ctx context.Context, employeeID string)
 	var attendances []*domain.Attendance
 	for rows.Next() {
 		var att domain.Attendance
-		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late, &att.CreatedAt); err != nil {
+		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late,
+			&att.IsRemote, &att.Corrected, &att.CorrectionReason, &att.CorrectedBy, &att.CorrectedAt, &att.CreatedAt); err != nil {
 			return nil, err
 		}
 		attendances = append(attendances, &att)
@@ -248,7 +252,7 @@ func (r *AttendanceRepo) GetByEmployeeAndMonth(ctx context.Context, employeeID s
 	}
 	endDate := fmt.Sprintf("%d-%02d-01", year, month)
 
-	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, created_at 
+	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, is_remote, corrected, correction_reason, corrected_by, corrected_at, created_at 
 		FROM attendances 
 		WHERE employee_id = $1 AND date >= $2::date AND date < $3::date
 		ORDER BY date ASC`
@@ -261,7 +265,8 @@ func (r *AttendanceRepo) GetByEmployeeAndMonth(ctx context.Context, employeeID s
 	var attendances []*domain.Attendance
 	for rows.Next() {
 		var att domain.Attendance
-		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late, &att.CreatedAt); err != nil {
+		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late,
+			&att.IsRemote, &att.Corrected, &att.CorrectionReason, &att.CorrectedBy, &att.CorrectedAt, &att.CreatedAt); err != nil {
 			return nil, err
 		}
 		attendances = append(attendances, &att)
@@ -270,11 +275,9 @@ func (r *AttendanceRepo) GetByEmployeeAndMonth(ctx context.Context, employeeID s
 }
 
 func (r *AttendanceRepo) Update(ctx context.Context, att *domain.Attendance) error {
-	// Only update check_out, worked_hours, and late - check_in should already be set
-	// Use NOW() for check_out since that's the actual current time
-	// Note: worked_hours is passed directly as float64 pointer
-	query := `UPDATE attendances SET check_out = NOW(), worked_hours = $2, late = $3 WHERE id = $1`
-	_, err := r.pool.Exec(ctx, query, att.ID, att.WorkedHours, att.Late)
+	// Update attendance record with all fields
+	query := `UPDATE attendances SET check_in = $2, check_out = $3, worked_hours = $4, late = $5, is_remote = $6, corrected = $7, correction_reason = $8, corrected_by = $9, corrected_at = $10 WHERE id = $1`
+	_, err := r.pool.Exec(ctx, query, att.ID, att.CheckIn, att.CheckOut, att.WorkedHours, att.Late, att.IsRemote, att.Corrected, att.CorrectionReason, att.CorrectedBy, att.CorrectedAt)
 	return err
 }
 
@@ -284,7 +287,7 @@ func (r *AttendanceRepo) Delete(ctx context.Context, id string) error {
 }
 
 func (r *AttendanceRepo) GetByDateRange(ctx context.Context, startDate, endDate string) ([]*domain.Attendance, error) {
-	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, created_at 
+	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, is_remote, corrected, correction_reason, corrected_by, corrected_at, created_at 
 		FROM attendances WHERE date >= $1::date AND date <= $2::date ORDER BY date ASC, employee_id ASC`
 	rows, err := r.pool.Query(ctx, query, startDate, endDate)
 	if err != nil {
@@ -295,7 +298,8 @@ func (r *AttendanceRepo) GetByDateRange(ctx context.Context, startDate, endDate 
 	var attendances []*domain.Attendance
 	for rows.Next() {
 		var att domain.Attendance
-		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late, &att.CreatedAt); err != nil {
+		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late,
+			&att.IsRemote, &att.Corrected, &att.CorrectionReason, &att.CorrectedBy, &att.CorrectedAt, &att.CreatedAt); err != nil {
 			return nil, err
 		}
 		attendances = append(attendances, &att)
@@ -304,7 +308,7 @@ func (r *AttendanceRepo) GetByDateRange(ctx context.Context, startDate, endDate 
 }
 
 func (r *AttendanceRepo) GetByEmployeeAndDateRange(ctx context.Context, employeeID, startDate, endDate string) ([]*domain.Attendance, error) {
-	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, created_at 
+	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, is_remote, corrected, correction_reason, corrected_by, corrected_at, created_at 
 		FROM attendances WHERE employee_id = $1 AND date >= $2::date AND date <= $3::date ORDER BY date ASC`
 	rows, err := r.pool.Query(ctx, query, employeeID, startDate, endDate)
 	if err != nil {
@@ -315,7 +319,8 @@ func (r *AttendanceRepo) GetByEmployeeAndDateRange(ctx context.Context, employee
 	var attendances []*domain.Attendance
 	for rows.Next() {
 		var att domain.Attendance
-		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late, &att.CreatedAt); err != nil {
+		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late,
+			&att.IsRemote, &att.Corrected, &att.CorrectionReason, &att.CorrectedBy, &att.CorrectedAt, &att.CreatedAt); err != nil {
 			return nil, err
 		}
 		attendances = append(attendances, &att)
@@ -324,7 +329,7 @@ func (r *AttendanceRepo) GetByEmployeeAndDateRange(ctx context.Context, employee
 }
 
 func (r *AttendanceRepo) GetLateArrivals(ctx context.Context, startDate, endDate string) ([]*domain.Attendance, error) {
-	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, created_at 
+	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, is_remote, corrected, correction_reason, corrected_by, corrected_at, created_at 
 		FROM attendances WHERE late = true AND date >= $1::date AND date <= $2::date ORDER BY date ASC, employee_id ASC`
 	rows, err := r.pool.Query(ctx, query, startDate, endDate)
 	if err != nil {
@@ -335,7 +340,8 @@ func (r *AttendanceRepo) GetLateArrivals(ctx context.Context, startDate, endDate
 	var attendances []*domain.Attendance
 	for rows.Next() {
 		var att domain.Attendance
-		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late, &att.CreatedAt); err != nil {
+		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late,
+			&att.IsRemote, &att.Corrected, &att.CorrectionReason, &att.CorrectedBy, &att.CorrectedAt, &att.CreatedAt); err != nil {
 			return nil, err
 		}
 		attendances = append(attendances, &att)
@@ -344,7 +350,7 @@ func (r *AttendanceRepo) GetLateArrivals(ctx context.Context, startDate, endDate
 }
 
 func (r *AttendanceRepo) GetByEmployeeAndDateRangeWithOvertime(ctx context.Context, employeeID, startDate, endDate string, minHours float64) ([]*domain.Attendance, error) {
-	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, created_at 
+	query := `SELECT id, employee_id, date::text, check_in::text, check_out::text, worked_hours, late, is_remote, corrected, correction_reason, corrected_by, corrected_at, created_at 
 		FROM attendances WHERE employee_id = $1 AND date >= $2::date AND date <= $3::date 
 		AND worked_hours >= $4 ORDER BY date ASC`
 	rows, err := r.pool.Query(ctx, query, employeeID, startDate, endDate, minHours)
@@ -356,7 +362,8 @@ func (r *AttendanceRepo) GetByEmployeeAndDateRangeWithOvertime(ctx context.Conte
 	var attendances []*domain.Attendance
 	for rows.Next() {
 		var att domain.Attendance
-		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late, &att.CreatedAt); err != nil {
+		if err := rows.Scan(&att.ID, &att.EmployeeID, &att.Date, &att.CheckIn, &att.CheckOut, &att.WorkedHours, &att.Late,
+			&att.IsRemote, &att.Corrected, &att.CorrectionReason, &att.CorrectedBy, &att.CorrectedAt, &att.CreatedAt); err != nil {
 			return nil, err
 		}
 		attendances = append(attendances, &att)

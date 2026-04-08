@@ -402,6 +402,52 @@ func (h *Handler) DeleteEmployee(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// CorrectAttendance handles PUT /api/admin/attendances/{id}/correct
+func (h *Handler) CorrectAttendance(w http.ResponseWriter, r *http.Request) {
+	id := path.Base(r.URL.Path)
+	if id == "" || id == "attendances" {
+		http.Error(w, "Attendance ID required", http.StatusBadRequest)
+		return
+	}
+
+	var req CorrectAttendanceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.CheckIn == "" {
+		http.Error(w, "Check-in time is required", http.StatusBadRequest)
+		return
+	}
+	if req.CheckOut == "" {
+		http.Error(w, "Check-out time is required", http.StatusBadRequest)
+		return
+	}
+	if req.CorrectionReason == "" {
+		http.Error(w, "Correction reason is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get admin ID from context (set by auth middleware)
+	adminID := r.Context().Value("user_id")
+	if adminID == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Call service to correct attendance
+	att, err := h.attendanceSvc.CorrectAttendance(r.Context(), id, adminID.(string), req.CheckIn, req.CheckOut, req.CorrectionReason, req.Date)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(att)
+}
+
 // Shift handlers
 
 type CreateShiftRequest struct {
@@ -587,7 +633,8 @@ func (h *Handler) DeleteShift(w http.ResponseWriter, r *http.Request) {
 // Attendance handlers
 
 type CheckAttendanceRequest struct {
-	DNI string `json:"dni"`
+	DNI      string `json:"dni"`
+	IsRemote bool   `json:"is_remote"`
 }
 
 type CheckAttendanceResponse struct {
@@ -655,6 +702,7 @@ func (h *Handler) CheckAttendance(w http.ResponseWriter, r *http.Request) {
 			Date:       today,
 			CheckIn:    &checkInTime,
 			Late:       late,
+			IsRemote:   req.IsRemote,
 			CreatedAt:  now,
 		}
 
@@ -880,6 +928,14 @@ type EmployeeShiftResponse struct {
 	ShiftID    string  `json:"shift_id"`
 	StartDate  string  `json:"start_date"`
 	EndDate    *string `json:"end_date"`
+}
+
+// Attendance correction request
+type CorrectAttendanceRequest struct {
+	Date             string `json:"date,omitempty"`
+	CheckIn          string `json:"check_in"`
+	CheckOut         string `json:"check_out"`
+	CorrectionReason string `json:"correction_reason"`
 }
 
 func (h *Handler) AssignShift(w http.ResponseWriter, r *http.Request) {

@@ -174,3 +174,132 @@ func formatTime(timestamp string) string {
 	}
 	return timestamp
 }
+
+// SpecialReportData holds the data for generating a special report
+type SpecialReportData struct {
+	EmployeeID    string
+	Header        string
+	CustomText    string
+	IncludeDays   bool
+	IncludeHours  bool
+	IncludeMonths bool
+	IncludePeriod bool
+	StartDate     string
+	EndDate       string
+}
+
+// GenerateSpecialReport creates a PDF for the special report with custom text
+func (s *ReportService) GenerateSpecialReport(emp *domain.Employee, summary *domain.MonthlySummary, req *SpecialReportData) ([]byte, error) {
+	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.SetFont("Arial", "", 10)
+
+	// Add page
+	pdf.AddPage()
+
+	// Custom header if provided
+	if req.Header != "" {
+		pdf.SetFont("Arial", "B", 14)
+		pdf.Cell(190, 10, req.Header)
+		pdf.Ln(10)
+	}
+
+	// Employee Information Section
+	pdf.SetFont("Arial", "B", 12)
+	pdf.Cell(190, 8, "Datos del Empleado")
+	pdf.Ln(6)
+
+	pdf.SetFont("Arial", "", 10)
+	pdf.Cell(50, 6, "Nombre:")
+	pdf.Cell(140, 6, fmt.Sprintf("%s %s", emp.FirstName, emp.LastName))
+	pdf.Ln(5)
+
+	pdf.Cell(50, 6, "DNI:")
+	pdf.Cell(140, 6, emp.DNI)
+	pdf.Ln(5)
+
+	pdf.Cell(50, 6, "Legajo:")
+	pdf.Cell(140, 6, emp.ID)
+	pdf.Ln(10)
+
+	// Period section (optional)
+	if req.IncludePeriod && req.StartDate != "" && req.EndDate != "" {
+		pdf.SetFont("Arial", "B", 12)
+		pdf.Cell(190, 8, "Periodo del Informe")
+		pdf.Ln(6)
+
+		pdf.SetFont("Arial", "", 10)
+		pdf.Cell(50, 6, "Desde:")
+		pdf.Cell(140, 6, req.StartDate)
+		pdf.Ln(5)
+
+		pdf.Cell(50, 6, "Hasta:")
+		pdf.Cell(140, 6, req.EndDate)
+		pdf.Ln(10)
+	}
+
+	// Custom text (required)
+	pdf.SetFont("Arial", "B", 12)
+	pdf.Cell(190, 8, "Resumen")
+	pdf.Ln(6)
+
+	pdf.SetFont("Arial", "", 10)
+	// Split text into lines to fit the width
+	lines := strings.Split(req.CustomText, "\n")
+	for _, line := range lines {
+		pdf.Cell(190, 6, line)
+		pdf.Ln(5)
+	}
+	pdf.Ln(6)
+
+	// Statistics section (optional)
+	showStats := req.IncludeDays || req.IncludeHours || req.IncludeMonths
+
+	if showStats {
+		pdf.SetFont("Arial", "B", 12)
+		pdf.Cell(190, 8, "Estadisticas")
+		pdf.Ln(6)
+
+		pdf.SetFont("Arial", "", 10)
+
+		if req.IncludeDays {
+			pdf.Cell(190, 6, fmt.Sprintf("Dias trabajados: %d", summary.WorkedDays))
+			pdf.Ln(5)
+		}
+
+		if req.IncludeHours {
+			pdf.Cell(190, 6, fmt.Sprintf("Horas trabajadas: %.2f", summary.WorkedHours))
+			pdf.Ln(5)
+		}
+
+		if req.IncludeMonths {
+			// Calculate months roughly
+			months := 1
+			if req.StartDate != "" && req.EndDate != "" {
+				start, err := time.Parse("2006-01-02", req.StartDate)
+				if err == nil {
+					end, err := time.Parse("2006-01-02", req.EndDate)
+					if err == nil {
+						months = int(end.Sub(start).Hours()/(24*30)) + 1
+						if months < 1 {
+							months = 1
+						}
+					}
+				}
+			}
+			pdf.Cell(190, 6, fmt.Sprintf("Meses en el periodo: %d", months))
+			pdf.Ln(5)
+		}
+
+		pdf.Ln(6)
+	}
+
+	// Footer with generation date
+	pdf.Ln(15)
+	pdf.SetFont("Arial", "I", 8)
+	pdf.Cell(190, 5, fmt.Sprintf("Informe generado el %s", time.Now().Format("02/01/2006 15:04")))
+
+	// Output to bytes using a buffer
+	var buf bytes.Buffer
+	pdf.Output(&buf)
+	return buf.Bytes(), nil
+}

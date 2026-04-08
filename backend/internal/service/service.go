@@ -382,6 +382,111 @@ func (s *AttendanceService) CalculateMonthlySummary(ctx context.Context, employe
 	}, nil
 }
 
+// CalculateSummaryForPeriod calculates attendance summary for a custom date range
+func (s *AttendanceService) CalculateSummaryForPeriod(ctx context.Context, employeeID string, startDate, endDate time.Time, emp *domain.Employee) (*domain.MonthlySummary, error) {
+	// Get attendances for the period
+	attendances, err := s.repo.GetByEmployeeAndDateRange(ctx, employeeID, startDate.Format("2006-01-02"), endDate.Format("2006-01-02"))
+	if err != nil {
+		return nil, err
+	}
+
+	// Calculate working days in the period
+	totalDays := countWeekdays(startDate.Format("2006-01-02"), endDate.Format("2006-01-02"))
+
+	// Determine expected hours - use employee custom hours if set
+	expectedHours := 0.0
+	if emp != nil && (emp.DailyHours > 0 || emp.MonthlyHours > 0) {
+		if emp.MonthlyHours > 0 {
+			// Calculate proportionally for the period
+			months := endDate.Sub(startDate).Hours() / (24 * 30)
+			if months < 1 {
+				months = 1
+			}
+			expectedHours = emp.MonthlyHours * months
+		} else if emp.DailyHours > 0 {
+			expectedHours = emp.DailyHours * float64(totalDays)
+		}
+	} else {
+		// Use shift-based: get shifts for the period and calculate expected hours
+		year := startDate.Year()
+		month := int(startDate.Month())
+		shiftAssignments, err := s.empShiftSvc.GetByEmployeeAndMonth(ctx, employeeID, year, month)
+		if err == nil && len(shiftAssignments) > 0 {
+			for _, assignment := range shiftAssignments {
+				shift, err := s.shiftSvc.GetByID(ctx, assignment.ShiftID)
+				if err == nil && shift != nil {
+					days := calculateShiftDaysInMonth(assignment, year, month)
+					expectedHours += float64(days) * shift.ExpectedHours
+				}
+			}
+		}
+	}
+
+	// Calculate worked hours and late arrivals
+	var workedHours float64
+	var lateArrivals int
+	workedDays := 0
+	dailyDetails := make([]domain.DailySummary, 0, len(attendances))
+
+	for _, att := range attendances {
+		worked := 0.0
+		if att.WorkedHours != nil {
+			worked = *att.WorkedHours
+		}
+		workedHours += worked
+
+		if att.CheckIn != nil && att.CheckOut != nil {
+			workedDays++
+		}
+
+		if att.Late {
+			lateArrivals++
+		}
+
+		shiftName := ""
+		dailyDetails = append(dailyDetails, domain.DailySummary{
+			Date:        att.Date,
+			CheckIn:     "",
+			CheckOut:    "",
+			WorkedHours: worked,
+			ShiftName:   shiftName,
+			IsLate:      att.Late,
+		})
+	}
+
+	// Calculate extra hours
+	extraHours := workedHours - expectedHours
+	if extraHours < 0 {
+		extraHours = 0
+	}
+
+	// Calculate missing hours
+	missingHours := expectedHours - workedHours
+	if missingHours < 0 {
+		missingHours = 0
+	}
+
+	missingDays := totalDays - workedDays
+	if missingDays < 0 {
+		missingDays = 0
+	}
+
+	return &domain.MonthlySummary{
+		Year:          startDate.Year(),
+		Month:         int(startDate.Month()),
+		EmployeeID:    employeeID,
+		TotalDays:     totalDays,
+		WorkedDays:    workedDays,
+		MissingDays:   missingDays,
+		ExpectedHours: expectedHours,
+		WorkedHours:   workedHours,
+		MissingHours:  missingHours,
+		ExtraHours:    extraHours,
+		LateArrivals:  lateArrivals,
+		DailyDetails:  dailyDetails,
+	}, nil
+}
+
 // Helper: countWorkingDays returns number of weekdays in a month
 func countWorkingDays(year, month int) int {
 	// Simple calculation: 4 weeks * 5 workdays = 20, adjusted by actual calendar

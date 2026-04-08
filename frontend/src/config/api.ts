@@ -342,6 +342,43 @@ export const api = {
     if (!response.ok) throw new Error('Error al obtener reporte de horas extras');
     return response.json();
   },
+
+  async generateSpecialReport(
+    token: string,
+    employeeId: string,
+    header: string,
+    customText: string,
+    includeDays: boolean,
+    includeHours: boolean,
+    includeMonths: boolean,
+    includePeriod: boolean,
+    startDate?: string,
+    endDate?: string
+  ): Promise<Blob> {
+    const response = await fetch(`${API_URL}/api/reports/special`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        employee_id: employeeId,
+        header,
+        custom_text: customText,
+        include_days: includeDays,
+        include_hours: includeHours,
+        include_months: includeMonths,
+        include_period: includePeriod,
+        start_date: startDate || '',
+        end_date: endDate || '',
+      }),
+    });
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Error al generar informe especial');
+    }
+    return response.blob();
+  },
 };
 
 // Local storage helpers for auth

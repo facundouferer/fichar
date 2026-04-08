@@ -12,6 +12,7 @@ import AdminLayout from '../../layouts/AdminLayout.astro';
       <button class="tab-btn" data-tab="attendance">Asistencia</button>
       <button class="tab-btn" data-tab="late">Tardanzas</button>
       <button class="tab-btn" data-tab="overtime">Horas Extra</button>
+      <button class="tab-btn" data-tab="special">Informe Especial</button>
     </div>
 
     <div class="filters" id="filters">
@@ -138,6 +139,11 @@ import AdminLayout from '../../layouts/AdminLayout.astro';
           content.innerHTML = renderTable('Horas Extra', ['Fecha', 'Empleado', 'DNI', 'Horas Trab.', 'Horas Extra'],
             ot.length ? ot.map(r => [r.date, r.employee_name, r.dni, r.worked_hours.toFixed(1), r.overtime_hours.toFixed(1)]) : []);
           break;
+          
+        case 'special':
+          filterContainer.style.display = 'none';
+          content.innerHTML = renderSpecialReportForm();
+          break;
       }
     } catch (e: any) {
       content.innerHTML = `<div class="error">Error: ${e.message}</div>`;
@@ -175,6 +181,130 @@ import AdminLayout from '../../layouts/AdminLayout.astro';
       </div>
     `;
   }
+
+  function renderSpecialReportForm(): string {
+    const today = new Date().toISOString().split('T')[0];
+    const firstOfMonth = today.substring(0, 7) + '-01';
+    
+    return `
+      <div class="special-report-form">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="special-employee">Empleado</label>
+            <select id="special-employee" required>
+              <option value="">Seleccionar empleado...</option>
+              ${employees.map(e => `<option value="${e.id}">${e.first_name} ${e.last_name}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label for="special-header">Encabezado (opcional)</label>
+            <input type="text" id="special-header" placeholder="Ej: Certificado de Trabajo" />
+          </div>
+        </div>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label for="special-text">Texto del informe (requerido)</label>
+            <textarea id="special-text" rows="4" required placeholder="Escriba el texto que aparecerá en el informe..."></textarea>
+          </div>
+        </div>
+        
+        <div class="form-row checkboxes">
+          <div class="checkbox-group">
+            <input type="checkbox" id="include-days" />
+            <label for="include-days">Incluir días trabajados</label>
+          </div>
+          <div class="checkbox-group">
+            <input type="checkbox" id="include-hours" />
+            <label for="include-hours">Incluir horas trabajadas</label>
+          </div>
+          <div class="checkbox-group">
+            <input type="checkbox" id="include-months" />
+            <label for="include-months">Incluir meses del periodo</label>
+          </div>
+          <div class="checkbox-group">
+            <input type="checkbox" id="include-period" checked />
+            <label for="include-period">Incluir periodo del informe</label>
+          </div>
+        </div>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label for="special-start">Fecha desde</label>
+            <input type="date" id="special-start" value="${firstOfMonth}" />
+          </div>
+          <div class="form-group">
+            <label for="special-end">Fecha hasta</label>
+            <input type="date" id="special-end" value="${today}" />
+          </div>
+        </div>
+        
+        <div class="form-actions">
+          <button type="button" class="btn-primary" id="generate-special-report">Generar PDF</button>
+        </div>
+        
+        <div id="special-report-status"></div>
+      </div>
+    `;
+  }
+
+  // Handle special report form submission
+  document.addEventListener('click', async (e) => {
+    const target = e.target as HTMLElement;
+    if (target.id === 'generate-special-report') {
+      const employeeId = (document.getElementById('special-employee') as HTMLSelectElement).value;
+      const header = (document.getElementById('special-header') as HTMLInputElement).value;
+      const customText = (document.getElementById('special-text') as HTMLTextAreaElement).value;
+      const includeDays = (document.getElementById('include-days') as HTMLInputElement).checked;
+      const includeHours = (document.getElementById('include-hours') as HTMLInputElement).checked;
+      const includeMonths = (document.getElementById('include-months') as HTMLInputElement).checked;
+      const includePeriod = (document.getElementById('include-period') as HTMLInputElement).checked;
+      const startDate = (document.getElementById('special-start') as HTMLInputElement).value;
+      const endDate = (document.getElementById('special-end') as HTMLInputElement).value;
+      
+      const statusDiv = document.getElementById('special-report-status');
+      
+      if (!employeeId) {
+        statusDiv.innerHTML = '<div class="error">Debe seleccionar un empleado</div>';
+        return;
+      }
+      
+      if (!customText) {
+        statusDiv.innerHTML = '<div class="error">Debe escribir el texto del informe</div>';
+        return;
+      }
+      
+      statusDiv.innerHTML = '<div class="loading">Generando informe...</div>';
+      
+      try {
+        const token = auth.getToken();
+        if (!token) return;
+        
+        const blob = await api.generateSpecialReport(
+          token, employeeId, header, customText,
+          includeDays, includeHours, includeMonths, includePeriod,
+          startDate, endDate
+        );
+        
+        // Download the PDF
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `informe_especial.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        statusDiv.innerHTML = '<div class="success">Informe generado correctamente</div>';
+      } catch (err: any) {
+        statusDiv.innerHTML = `<div class="error">Error: ${err.message}</div>`;
+      }
+    }
+  });
 
   // Store current attendance data for correction
   let attendanceData: any[] = [];
@@ -332,4 +462,13 @@ import AdminLayout from '../../layouts/AdminLayout.astro';
   
   .loading, .empty, .error { padding: 2rem; text-align: center; color: #64748b; }
   .error { color: #dc2626; }
+  .success { color: #16a34a; padding: 1rem; text-align: center; background: #dcfce7; border-radius: 0.5rem; margin-top: 1rem; }
+  
+  .special-report-form { background: white; padding: 1.5rem; border-radius: 0.75rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .form-row { margin-bottom: 1rem; }
+  .form-row.checkboxes { display: flex; gap: 1.5rem; flex-wrap: wrap; margin: 1rem 0; }
+  .checkbox-group { display: flex; align-items: center; gap: 0.5rem; }
+  .checkbox-group input { width: auto; }
+  .form-actions { margin-top: 1.5rem; }
+  .form-actions .btn-primary { width: 100%; max-width: 300px; }
 </style>

@@ -938,6 +938,19 @@ type CorrectAttendanceRequest struct {
 	CorrectionReason string `json:"correction_reason"`
 }
 
+// Special report request
+type SpecialReportRequest struct {
+	EmployeeID    string `json:"employee_id"`
+	Header        string `json:"header,omitempty"`
+	CustomText    string `json:"custom_text"`
+	IncludeDays   bool   `json:"include_days"`
+	IncludeHours  bool   `json:"include_hours"`
+	IncludeMonths bool   `json:"include_months"`
+	IncludePeriod bool   `json:"include_period"`
+	StartDate     string `json:"start_date,omitempty"`
+	EndDate       string `json:"end_date,omitempty"`
+}
+
 func (h *Handler) AssignShift(w http.ResponseWriter, r *http.Request) {
 	var req AssignShiftRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1522,6 +1535,91 @@ func (h *Handler) ExportMonthlyReport(w http.ResponseWriter, r *http.Request) {
 	// Set headers for PDF download
 	monthName := []string{"Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"}
 	filename := fmt.Sprintf("informe_%s_%s_%d.pdf", emp.LastName, monthName[month-1], year)
+
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(pdfBytes)))
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(pdfBytes)
+}
+
+// GenerateSpecialReport generates a special PDF report with custom text
+func (h *Handler) GenerateSpecialReport(w http.ResponseWriter, r *http.Request) {
+	var req SpecialReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.EmployeeID == "" {
+		http.Error(w, "employee_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.CustomText == "" {
+		http.Error(w, "custom_text is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get employee info
+	emp, err := h.employeeSvc.GetByID(r.Context(), req.EmployeeID)
+	if err != nil {
+		http.Error(w, "Employee not found", http.StatusNotFound)
+		return
+	}
+
+	// Calculate summary based on period
+	var summary *domain.MonthlySummary
+	if req.StartDate != "" && req.EndDate != "" {
+		start, err := time.Parse("2006-01-02", req.StartDate)
+		if err != nil {
+			http.Error(w, "Invalid start_date format", http.StatusBadRequest)
+			return
+		}
+		end, err := time.Parse("2006-01-02", req.EndDate)
+		if err != nil {
+			http.Error(w, "Invalid end_date format", http.StatusBadRequest)
+			return
+		}
+
+		summary, err = h.attendanceSvc.CalculateSummaryForPeriod(r.Context(), req.EmployeeID, start, end, emp)
+		if err != nil {
+			http.Error(w, "Failed to calculate summary", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// Default to current month
+		now := time.Now()
+		summary, err = h.attendanceSvc.CalculateSummaryForPeriod(r.Context(), req.EmployeeID, time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC), now, emp)
+		if err != nil {
+			http.Error(w, "Failed to calculate summary", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Generate PDF
+	pdfData := &pdf.SpecialReportData{
+		EmployeeID:    req.EmployeeID,
+		Header:        req.Header,
+		CustomText:    req.CustomText,
+		IncludeDays:   req.IncludeDays,
+		IncludeHours:  req.IncludeHours,
+		IncludeMonths: req.IncludeMonths,
+		IncludePeriod: req.IncludePeriod,
+		StartDate:     req.StartDate,
+		EndDate:       req.EndDate,
+	}
+	pdfBytes, err := h.pdfSvc.GenerateSpecialReport(emp, summary, pdfData)
+	if err != nil {
+		log.Printf("Error generating special PDF: %v", err)
+		http.Error(w, "Failed to generate PDF", http.StatusInternalServerError)
+		return
+	}
+
+	// Set headers for PDF download
+	filename := fmt.Sprintf("informe_especial_%s.pdf", emp.LastName)
 
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))

@@ -619,16 +619,48 @@ Herramientas:
 
 ## Roadmap Inicial
 
-1. Infraestructura docker
-2. Esquema base de datos
-3. API registro asistencia
-4. CRUD empleados
-5. CRUD turnos
-6. Cálculo horas
-7. Reportes
-8. Exportación PDF
-9. Frontend
-10. Logging
+1. Infraestructura docker ✅
+2. Esquema base de datos ✅
+3. API registro asistencia ✅
+4. CRUD empleados ✅
+5. CRUD turnos ✅
+6. Cálculo horas ✅
+7. Reportes ✅
+8. Exportación PDF ✅
+9. Frontend ✅
+10. Logging ✅
+11. Observabilidad ✅
+12. Testing ✅
+
+## Roadmap Completado (Abril 2026)
+
+Todas las issues iniciales (#1-#16) han sido implementadas:
+
+| # | Issue | Estado |
+|---|-------|--------|
+| #1 | Bootstrap infraestructura | ✅ CLOSED |
+| #2 | DB schema | ✅ CLOSED |
+| #3 | Backend bootstrap | ✅ CLOSED |
+| #4 | Auth JWT + RBAC | ✅ CLOSED |
+| #5 | Employees CRUD | ✅ CLOSED |
+| #6 | Shifts CRUD | ✅ CLOSED |
+| #7 | Attendance check | ✅ CLOSED |
+| #8 | Attendance calculations | ✅ CLOSED |
+| #9 | Audit logging | ✅ CLOSED |
+| #10 | Reports API | ✅ CLOSED |
+| #11 | PDF export | ✅ CLOSED |
+| #12 | Frontend public/auth | ✅ CLOSED |
+| #13 | Frontend admin | ✅ CLOSED |
+| #14 | Frontend employee | ✅ CLOSED |
+| #15 | Observability | ✅ CLOSED |
+| #16 | Testing | ✅ CLOSED |
+
+## Funcionalidades Extensiones (Pendientes)
+
+Las siguientes features fueron identificadas post-launch:
+- #19 - Seteo de cantidad de horas por empleado
+- #20 - Permitir correcciones manuales
+- #21 - Informe Especial (PDF con texto libre)
 
 ---
 

@@ -1,0 +1,287 @@
+---
+import EmployeeLayout from '../../layouts/EmployeeLayout.astro';
+---
+
+<EmployeeLayout>
+  <div class="page">
+    <h1 class="page-title">Mis Reportes</h1>
+    <p class="page-subtitle">Descarga tus informes de asistencia</p>
+
+    <div class="report-options">
+      <div class="report-card">
+        <div class="report-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+          </svg>
+        </div>
+        <div class="report-content">
+          <h3>Informe Mensual</h3>
+          <p>Genera un PDF con tu resumen mensual de asistencia</p>
+        </div>
+        <div class="report-actions">
+          <select id="report-year" class="report-select"></select>
+          <select id="report-month" class="report-select">
+            <option value="1">Enero</option>
+            <option value="2">Febrero</option>
+            <option value="3">Marzo</option>
+            <option value="4">Abril</option>
+            <option value="5">Mayo</option>
+            <option value="6">Junio</option>
+            <option value="7">Julio</option>
+            <option value="8">Agosto</option>
+            <option value="9">Septiembre</option>
+            <option value="10">Octubre</option>
+            <option value="11">Noviembre</option>
+            <option value="12">Diciembre</option>
+          </select>
+          <button class="btn-download" id="download-pdf">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            Descargar PDF
+          </button>
+        </div>
+      </div>
+
+      <div class="info-card">
+        <h3>Información</h3>
+        <ul>
+          <li>El informe incluye todos los registros del mes seleccionado</li>
+          <li>Puedes consultar tu historial en la sección correspondiente</li>
+          <li>Para cualquier discrepancy, contacta a tu administrador</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="download-status" id="download-status" style="display: none;"></div>
+  </div>
+</EmployeeLayout>
+
+<script>
+  import { auth, API_URL } from '../../config/api';
+
+  const yearSelect = document.getElementById('report-year') as HTMLSelectElement;
+  const monthSelect = document.getElementById('report-month') as HTMLSelectElement;
+  const downloadBtn = document.getElementById('download-pdf') as HTMLButtonElement;
+  const statusDiv = document.getElementById('download-status');
+
+  // Set current year/month
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+
+  for (let y = currentYear; y >= currentYear - 2; y--) {
+    const option = document.createElement('option');
+    option.value = y.toString();
+    option.textContent = y.toString();
+    yearSelect.appendChild(option);
+  }
+
+  monthSelect.value = currentMonth.toString();
+
+  downloadBtn.addEventListener('click', async () => {
+    const user = auth.getUser();
+    const token = auth.getToken();
+    if (!user || !token) {
+      window.location.href = '/login';
+      return;
+    }
+
+    const year = parseInt(yearSelect.value);
+    const month = parseInt(monthSelect.value);
+
+    downloadBtn.disabled = true;
+    downloadBtn.textContent = 'Generando...';
+    statusDiv.style.display = 'none';
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/reports/monthly/export-pdf?employee_id=${user.id}&year=${year}&month=${month}`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      if (!response.ok) throw new Error('Error al generar PDF');
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+      a.download = `informe_${user.last_name}_${monthNames[month - 1]}_${year}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      statusDiv.style.display = 'block';
+      statusDiv.className = 'download-status success';
+      statusDiv.innerHTML = '✓ Informe descargado correctamente';
+      
+      setTimeout(() => { statusDiv.style.display = 'none'; }, 3000);
+
+    } catch (e) {
+      statusDiv.style.display = 'block';
+      statusDiv.className = 'download-status error';
+      statusDiv.innerHTML = '✕ Error al generar informe. Intenta nuevamente.';
+    } finally {
+      downloadBtn.disabled = false;
+      downloadBtn.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        Descargar PDF
+      `;
+    }
+  });
+</script>
+
+<style>
+  .page { max-width: 800px; margin: 0 auto; }
+
+  .page-title {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+  }
+
+  .page-subtitle {
+    color: #64748b;
+    margin: 0.5rem 0 2rem;
+  }
+
+  .report-options {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .report-card {
+    background: white;
+    border-radius: 1rem;
+    padding: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    align-items: center;
+  }
+
+  .report-icon {
+    width: 56px;
+    height: 56px;
+    background: #dbeafe;
+    color: #2563eb;
+    border-radius: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .report-content {
+    flex: 1;
+    min-width: 200px;
+  }
+
+  .report-content h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #1e293b;
+    margin: 0 0 0.25rem;
+  }
+
+  .report-content p {
+    font-size: 0.875rem;
+    color: #64748b;
+    margin: 0;
+  }
+
+  .report-actions {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .report-select {
+    padding: 0.5rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    background: white;
+  }
+
+  .btn-download {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    background: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 0.5rem;
+    font-weight: 600;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .btn-download:hover:not(:disabled) { background: #2563eb; }
+  .btn-download:disabled { opacity: 0.7; cursor: not-allowed; }
+
+  .info-card {
+    background: #f8fafc;
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+    border: 1px solid #e5e7eb;
+  }
+
+  .info-card h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #1e293b;
+    margin: 0 0 0.75rem;
+  }
+
+  .info-card ul {
+    margin: 0;
+    padding-left: 1.25rem;
+  }
+
+  .info-card li {
+    color: #64748b;
+    font-size: 0.875rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .info-card li:last-child { margin-bottom: 0; }
+
+  .download-status {
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  .download-status.success {
+    background: #dcfce7;
+    color: #16a34a;
+    border: 1px solid #bbf7d0;
+  }
+
+  .download-status.error {
+    background: #fef2f2;
+    color: #dc2626;
+    border: 1px solid #fecaca;
+  }
+</style>

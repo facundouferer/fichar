@@ -111,6 +111,22 @@ func (s *AttendanceService) GetByEmployeeAndMonth(ctx context.Context, employeeI
 	return s.repo.GetByEmployeeAndMonth(ctx, employeeID, year, month)
 }
 
+func (s *AttendanceService) GetByDateRange(ctx context.Context, startDate, endDate string) ([]*domain.Attendance, error) {
+	return s.repo.GetByDateRange(ctx, startDate, endDate)
+}
+
+func (s *AttendanceService) GetByEmployeeAndDateRange(ctx context.Context, employeeID, startDate, endDate string) ([]*domain.Attendance, error) {
+	return s.repo.GetByEmployeeAndDateRange(ctx, employeeID, startDate, endDate)
+}
+
+func (s *AttendanceService) GetLateArrivals(ctx context.Context, startDate, endDate string) ([]*domain.Attendance, error) {
+	return s.repo.GetLateArrivals(ctx, startDate, endDate)
+}
+
+func (s *AttendanceService) GetOvertimeHours(ctx context.Context, employeeID, startDate, endDate string, minHours float64) ([]*domain.Attendance, error) {
+	return s.repo.GetByEmployeeAndDateRangeWithOvertime(ctx, employeeID, startDate, endDate, minHours)
+}
+
 func (s *AttendanceService) Update(ctx context.Context, att *domain.Attendance) error {
 	return s.repo.Update(ctx, att)
 }
@@ -119,8 +135,106 @@ func (s *AttendanceService) Delete(ctx context.Context, id string) error {
 	return s.repo.Delete(ctx, id)
 }
 
+// CorrectAttendance corrects an attendance record with new check-in/check-out times
+// Returns error if:
+// - Attendance not found
+// - Correction is beyond 7 days from the original date
+// - Check-in is after check-out
+// - No correction reason provided
+func (s *AttendanceService) CorrectAttendance(ctx context.Context, attendanceID, adminID, checkIn, checkOut, correctionReason, newDate string) (*domain.Attendance, error) {
+	// Get existing attendance
+	att, err := s.repo.GetByID(ctx, attendanceID)
+	if err != nil {
+		return nil, fmt.Errorf("attendance not found: %w", err)
+	}
+
+	// Parse the original date
+	originalDate, err := time.Parse("2006-01-02", att.Date)
+	if err != nil {
+		return nil, fmt.Errorf("invalid original date: %w", err)
+	}
+
+	// Check if correction is within 7 days
+	now := time.Now()
+	daysSinceOriginal := now.Sub(originalDate).Hours() / 24
+	if daysSinceOriginal > 7 {
+		return nil, fmt.Errorf("correction not allowed: records can only be corrected within 7 days (original: %s, days ago: %.1f)", att.Date, daysSinceOriginal)
+	}
+
+	// Parse check-in and check-out times
+	checkInTime, err := time.Parse("2006-01-02T15:04:05", checkIn)
+	if err != nil {
+		return nil, fmt.Errorf("invalid check-in format, use YYYY-MM-DDTHH:MM:SS: %w", err)
+	}
+
+	checkOutTime, err := time.Parse("2006-01-02T15:04:05", checkOut)
+	if err != nil {
+		return nil, fmt.Errorf("invalid check-out format, use YYYY-MM-DDTHH:MM:SS: %w", err)
+	}
+
+	// Validate check-in is before check-out
+	if !checkOutTime.After(checkInTime) {
+		return nil, fmt.Errorf("check-out must be after check-in")
+	}
+
+	// Validate correction reason is provided
+	if correctionReason == "" {
+		return nil, fmt.Errorf("correction reason is required")
+	}
+
+	// Calculate new worked hours
+	workedHours := checkOutTime.Sub(checkInTime).Hours()
+
+	// Get shift to determine if late
+	var isLate bool
+	assignments, err := s.empShiftSvc.GetByEmployeeAndMonth(ctx, att.EmployeeID, originalDate.Year(), int(originalDate.Month()))
+	if err == nil && len(assignments) > 0 {
+		for _, assign := range assignments {
+			if isDateInRange(att.Date, assign.StartDate, assign.EndDate) {
+				shift, err := s.shiftSvc.GetByID(ctx, assign.ShiftID)
+				if err == nil {
+					shiftStartHour, _ := time.Parse("15:04", shift.StartTime)
+					checkInHour, _ := time.Parse("15:04:05", checkIn[11:])
+					// Allow 15 minute tolerance
+					if checkInHour.After(shiftStartHour.Add(15 * time.Minute)) {
+						isLate = true
+					}
+				}
+				break
+			}
+		}
+	}
+
+	// Update attendance with correction
+	nowTime := time.Now()
+	checkInStr := checkIn
+	checkOutStr := checkOut
+	att.CheckIn = &checkInStr
+	att.CheckOut = &checkOutStr
+	workedHoursPtr := workedHours
+	att.WorkedHours = &workedHoursPtr
+	att.Late = isLate
+	att.Corrected = true
+	att.CorrectionReason = &correctionReason
+	att.CorrectedBy = &adminID
+	att.CorrectedAt = &nowTime
+
+	// If new date is provided and different, update it
+	if newDate != "" && newDate != att.Date {
+		att.Date = newDate
+	}
+
+	if err := s.repo.Update(ctx, att); err != nil {
+		return nil, fmt.Errorf("failed to update attendance: %w", err)
+	}
+
+	return att, nil
+}
+
 // CalculateMonthlySummary calculates the monthly attendance summary for an employee
-func (s *AttendanceService) CalculateMonthlySummary(ctx context.Context, employeeID string, year, month int) (*domain.MonthlySummary, error) {
+// If emp is provided and has custom hours set (DailyHours > 0 or MonthlyHours > 0),
+// those will override the shift-based calculation
+func (s *AttendanceService) CalculateMonthlySummary(ctx context.Context, employeeID string, year, month int, emp *domain.Employee) (*domain.MonthlySummary, error) {
 	// Get attendances for the month
 	attendances, err := s.repo.GetByEmployeeAndMonth(ctx, employeeID, year, month)
 	if err != nil {
@@ -144,13 +258,29 @@ func (s *AttendanceService) CalculateMonthlySummary(ctx context.Context, employe
 
 	// Calculate working days in the month (excluding weekends)
 	totalDays := countWorkingDays(year, month)
+
+	// Determine expected hours - use employee custom hours if set, otherwise fall back to shift
 	expectedHours := 0.0
-	for _, assignment := range shiftAssignments {
-		// Calculate overlap days with the month
-		shift := shiftMap[assignment.ShiftID]
-		if shift != nil {
-			days := calculateShiftDaysInMonth(assignment, year, month)
-			expectedHours += float64(days) * shift.ExpectedHours
+	var useCustomHours bool
+
+	if emp != nil && (emp.DailyHours > 0 || emp.MonthlyHours > 0) {
+		// Use employee's custom hours
+		useCustomHours = true
+		if emp.MonthlyHours > 0 {
+			expectedHours = emp.MonthlyHours
+		} else if emp.DailyHours > 0 {
+			// Calculate monthly hours from daily hours
+			expectedHours = emp.DailyHours * float64(totalDays)
+		}
+	} else {
+		// Use shift-based calculation
+		for _, assignment := range shiftAssignments {
+			// Calculate overlap days with the month
+			shift := shiftMap[assignment.ShiftID]
+			if shift != nil {
+				days := calculateShiftDaysInMonth(assignment, year, month)
+				expectedHours += float64(days) * shift.ExpectedHours
+			}
 		}
 	}
 
@@ -168,32 +298,47 @@ func (s *AttendanceService) CalculateMonthlySummary(ctx context.Context, employe
 
 		shiftName := ""
 		expected := 0.0
-		// Find the shift for this day
-		for _, assignment := range shiftAssignments {
-			if isDateInRange(att.Date, assignment.StartDate, assignment.EndDate) {
-				shift := shiftMap[assignment.ShiftID]
-				if shift != nil {
-					shiftName = shift.Name
-					expected = shift.ExpectedHours
-					break
+
+		// Determine daily expected hours - use custom or shift-based
+		if useCustomHours {
+			// Use employee's custom daily hours
+			if emp.DailyHours > 0 {
+				expected = emp.DailyHours
+			}
+		} else {
+			// Find the shift for this day
+			for _, assignment := range shiftAssignments {
+				if isDateInRange(att.Date, assignment.StartDate, assignment.EndDate) {
+					shift := shiftMap[assignment.ShiftID]
+					if shift != nil {
+						shiftName = shift.Name
+						expected = shift.ExpectedHours
+						break
+					}
 				}
 			}
 		}
 
 		daily := domain.DailySummary{
-			Date:          att.Date,
-			CheckIn:       "",
-			CheckOut:      "",
-			WorkedHours:   worked,
-			ExpectedHours: expected,
-			IsLate:        att.Late,
-			ShiftName:     shiftName,
+			Date:             att.Date,
+			CheckIn:          "",
+			CheckOut:         "",
+			WorkedHours:      worked,
+			ExpectedHours:    expected,
+			IsLate:           att.Late,
+			ShiftName:        shiftName,
+			IsRemote:         att.IsRemote,
+			Corrected:        att.Corrected,
+			CorrectionReason: "",
 		}
 		if att.CheckIn != nil {
 			daily.CheckIn = *att.CheckIn
 		}
 		if att.CheckOut != nil {
 			daily.CheckOut = *att.CheckOut
+		}
+		if att.Corrected && att.CorrectionReason != nil {
+			daily.CorrectionReason = *att.CorrectionReason
 		}
 		dailyDetails = append(dailyDetails, daily)
 
@@ -224,6 +369,111 @@ func (s *AttendanceService) CalculateMonthlySummary(ctx context.Context, employe
 	return &domain.MonthlySummary{
 		Year:          year,
 		Month:         month,
+		EmployeeID:    employeeID,
+		TotalDays:     totalDays,
+		WorkedDays:    workedDays,
+		MissingDays:   missingDays,
+		ExpectedHours: expectedHours,
+		WorkedHours:   workedHours,
+		MissingHours:  missingHours,
+		ExtraHours:    extraHours,
+		LateArrivals:  lateArrivals,
+		DailyDetails:  dailyDetails,
+	}, nil
+}
+
+// CalculateSummaryForPeriod calculates attendance summary for a custom date range
+func (s *AttendanceService) CalculateSummaryForPeriod(ctx context.Context, employeeID string, startDate, endDate time.Time, emp *domain.Employee) (*domain.MonthlySummary, error) {
+	// Get attendances for the period
+	attendances, err := s.repo.GetByEmployeeAndDateRange(ctx, employeeID, startDate.Format("2006-01-02"), endDate.Format("2006-01-02"))
+	if err != nil {
+		return nil, err
+	}
+
+	// Calculate working days in the period
+	totalDays := countWeekdays(startDate.Format("2006-01-02"), endDate.Format("2006-01-02"))
+
+	// Determine expected hours - use employee custom hours if set
+	expectedHours := 0.0
+	if emp != nil && (emp.DailyHours > 0 || emp.MonthlyHours > 0) {
+		if emp.MonthlyHours > 0 {
+			// Calculate proportionally for the period
+			months := endDate.Sub(startDate).Hours() / (24 * 30)
+			if months < 1 {
+				months = 1
+			}
+			expectedHours = emp.MonthlyHours * months
+		} else if emp.DailyHours > 0 {
+			expectedHours = emp.DailyHours * float64(totalDays)
+		}
+	} else {
+		// Use shift-based: get shifts for the period and calculate expected hours
+		year := startDate.Year()
+		month := int(startDate.Month())
+		shiftAssignments, err := s.empShiftSvc.GetByEmployeeAndMonth(ctx, employeeID, year, month)
+		if err == nil && len(shiftAssignments) > 0 {
+			for _, assignment := range shiftAssignments {
+				shift, err := s.shiftSvc.GetByID(ctx, assignment.ShiftID)
+				if err == nil && shift != nil {
+					days := calculateShiftDaysInMonth(assignment, year, month)
+					expectedHours += float64(days) * shift.ExpectedHours
+				}
+			}
+		}
+	}
+
+	// Calculate worked hours and late arrivals
+	var workedHours float64
+	var lateArrivals int
+	workedDays := 0
+	dailyDetails := make([]domain.DailySummary, 0, len(attendances))
+
+	for _, att := range attendances {
+		worked := 0.0
+		if att.WorkedHours != nil {
+			worked = *att.WorkedHours
+		}
+		workedHours += worked
+
+		if att.CheckIn != nil && att.CheckOut != nil {
+			workedDays++
+		}
+
+		if att.Late {
+			lateArrivals++
+		}
+
+		shiftName := ""
+		dailyDetails = append(dailyDetails, domain.DailySummary{
+			Date:        att.Date,
+			CheckIn:     "",
+			CheckOut:    "",
+			WorkedHours: worked,
+			ShiftName:   shiftName,
+			IsLate:      att.Late,
+		})
+	}
+
+	// Calculate extra hours
+	extraHours := workedHours - expectedHours
+	if extraHours < 0 {
+		extraHours = 0
+	}
+
+	// Calculate missing hours
+	missingHours := expectedHours - workedHours
+	if missingHours < 0 {
+		missingHours = 0
+	}
+
+	missingDays := totalDays - workedDays
+	if missingDays < 0 {
+		missingDays = 0
+	}
+
+	return &domain.MonthlySummary{
+		Year:          startDate.Year(),
+		Month:         int(startDate.Month()),
 		EmployeeID:    employeeID,
 		TotalDays:     totalDays,
 		WorkedDays:    workedDays,

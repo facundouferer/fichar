@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS employees (
     role VARCHAR(20) NOT NULL CHECK (role IN ('ADMIN', 'EMPLOYEE')),
     password_hash VARCHAR(255) NOT NULL,
     must_change_password BOOLEAN DEFAULT TRUE,
+    daily_hours NUMERIC(4,2) DEFAULT 8.0,
+    monthly_hours NUMERIC(5,2) DEFAULT 160.0,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -45,6 +47,11 @@ CREATE TABLE IF NOT EXISTS attendances (
     check_out TIMESTAMP,
     worked_hours NUMERIC(4, 2),
     late BOOLEAN DEFAULT FALSE,
+    is_remote BOOLEAN DEFAULT FALSE,
+    corrected BOOLEAN DEFAULT FALSE,
+    correction_reason TEXT,
+    corrected_by UUID REFERENCES employees(id),
+    corrected_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 

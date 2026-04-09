@@ -9,21 +9,33 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/facundouferer/fichar/backend/internal/domain"
 	"github.com/facundouferer/fichar/backend/internal/middleware"
 	"github.com/facundouferer/fichar/backend/internal/repository/postgres"
 	"github.com/facundouferer/fichar/backend/internal/service"
+	"github.com/facundouferer/fichar/backend/pkg/pdf"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 )
 
+// Handler holds all service dependencies and provides HTTP handlers
 type Handler struct {
 	employeeSvc      *service.EmployeeService
 	shiftSvc         *service.ShiftService
 	attendanceSvc    *service.AttendanceService
 	logSvc           *service.LogService
 	employeeShiftSvc *service.EmployeeShiftService
+	pdfSvc           *pdf.ReportService
+	dbHealthy        atomic.Bool  // Database health status
+	requestCount     atomic.Int64 // Total requests served
+}
+
+// StartRequestCount increments the request counter (call at start of each request)
+func (h *Handler) StartRequestCount() {
+	h.requestCount.Add(1)
 }
 
 func NewHandler(
@@ -39,9 +51,12 @@ func NewHandler(
 		attendanceSvc:    attendanceSvc,
 		logSvc:           logSvc,
 		employeeShiftSvc: employeeShiftSvc,
+		pdfSvc:           pdf.NewReportService(),
+		dbHealthy:        atomic.Bool{},
 	}
 }
 
+// Health returns basic liveness check (service is running)
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -51,21 +66,68 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Ready returns readiness check including database connectivity
+func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check database connectivity
+	if !h.dbHealthy.Load() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":   "unavailable",
+			"service":  "fichar-backend",
+			"database": "not connected",
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":   "ready",
+		"service":  "fichar-backend",
+		"database": "connected",
+	})
+}
+
+// SetDBHealthy updates the database health status
+func (h *Handler) SetDBHealthy(healthy bool) {
+	h.dbHealthy.Store(healthy)
+}
+
+// Metrics returns basic operational metrics
+func (h *Handler) Metrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	metrics := map[string]interface{}{
+		"requests_total":   h.requestCount.Load(),
+		"database_healthy": h.dbHealthy.Load(),
+		"timestamp":        time.Now().UTC().Format(time.RFC3339),
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(metrics)
+}
+
 // DTOs
 
 type CreateEmployeeRequest struct {
-	DNI       string `json:"dni"`
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name"`
-	Role      string `json:"role"`
-	ShiftID   string `json:"shift_id,omitempty"`
+	DNI          string  `json:"dni"`
+	FirstName    string  `json:"first_name"`
+	LastName     string  `json:"last_name"`
+	Role         string  `json:"role"`
+	Password     string  `json:"password,omitempty"`
+	ShiftID      string  `json:"shift_id,omitempty"`
+	DailyHours   float64 `json:"daily_hours"`
+	MonthlyHours float64 `json:"monthly_hours"`
 }
 
 type UpdateEmployeeRequest struct {
-	DNI       string `json:"dni,omitempty"`
-	FirstName string `json:"first_name,omitempty"`
-	LastName  string `json:"last_name,omitempty"`
-	Role      string `json:"role,omitempty"`
+	DNI          string  `json:"dni,omitempty"`
+	FirstName    string  `json:"first_name,omitempty"`
+	LastName     string  `json:"last_name,omitempty"`
+	Role         string  `json:"role,omitempty"`
+	DailyHours   float64 `json:"daily_hours,omitempty"`
+	MonthlyHours float64 `json:"monthly_hours,omitempty"`
 }
 
 type EmployeeResponse struct {
@@ -75,11 +137,23 @@ type EmployeeResponse struct {
 	LastName           string    `json:"last_name"`
 	Role               string    `json:"role"`
 	MustChangePassword bool      `json:"must_change_password"`
+	DailyHours         float64   `json:"daily_hours"`
+	MonthlyHours       float64   `json:"monthly_hours"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 func employeeToResponse(emp *domain.Employee) EmployeeResponse {
+	// Set default values if not set
+	dailyHours := emp.DailyHours
+	if dailyHours == 0 {
+		dailyHours = 8.0 // Default
+	}
+	monthlyHours := emp.MonthlyHours
+	if monthlyHours == 0 {
+		monthlyHours = 160.0 // Default (20 work days * 8 hours)
+	}
+
 	return EmployeeResponse{
 		ID:                 emp.ID,
 		DNI:                emp.DNI,
@@ -87,6 +161,8 @@ func employeeToResponse(emp *domain.Employee) EmployeeResponse {
 		LastName:           emp.LastName,
 		Role:               string(emp.Role),
 		MustChangePassword: emp.MustChangePassword,
+		DailyHours:         dailyHours,
+		MonthlyHours:       monthlyHours,
 		CreatedAt:          emp.CreatedAt,
 		UpdatedAt:          emp.UpdatedAt,
 	}
@@ -145,16 +221,40 @@ func (h *Handler) CreateEmployee(w http.ResponseWriter, r *http.Request) {
 
 	// Create employee
 	now := time.Now()
+
+	// Set default hours if not provided
+	dailyHours := req.DailyHours
+	if dailyHours == 0 {
+		dailyHours = 8.0
+	}
+	monthlyHours := req.MonthlyHours
+	if monthlyHours == 0 {
+		monthlyHours = 160.0
+	}
+
 	emp := &domain.Employee{
 		ID:                 generateUUID(),
 		DNI:                req.DNI,
 		FirstName:          req.FirstName,
 		LastName:           req.LastName,
 		Role:               domain.Role(req.Role),
-		PasswordHash:       "", // No password initially - must be set by admin or first login
+		PasswordHash:       "",
 		MustChangePassword: true,
+		DailyHours:         dailyHours,
+		MonthlyHours:       monthlyHours,
 		CreatedAt:          now,
 		UpdatedAt:          now,
+	}
+
+	// Hash password if provided
+	if req.Password != "" {
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+			return
+		}
+		emp.PasswordHash = string(hashedPassword)
+		emp.MustChangePassword = false // If password provided, no need to change
 	}
 
 	if err := h.employeeSvc.Create(r.Context(), emp); err != nil {
@@ -268,6 +368,13 @@ func (h *Handler) UpdateEmployee(w http.ResponseWriter, r *http.Request) {
 		}
 		emp.Role = domain.Role(req.Role)
 	}
+	// Update custom hours if provided (use 0 as "not set" to distinguish from actual 0)
+	if req.DailyHours > 0 {
+		emp.DailyHours = req.DailyHours
+	}
+	if req.MonthlyHours > 0 {
+		emp.MonthlyHours = req.MonthlyHours
+	}
 
 	emp.UpdatedAt = time.Now()
 
@@ -293,6 +400,52 @@ func (h *Handler) DeleteEmployee(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// CorrectAttendance handles PUT /api/admin/attendances/{id}/correct
+func (h *Handler) CorrectAttendance(w http.ResponseWriter, r *http.Request) {
+	id := path.Base(r.URL.Path)
+	if id == "" || id == "attendances" {
+		http.Error(w, "Attendance ID required", http.StatusBadRequest)
+		return
+	}
+
+	var req CorrectAttendanceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.CheckIn == "" {
+		http.Error(w, "Check-in time is required", http.StatusBadRequest)
+		return
+	}
+	if req.CheckOut == "" {
+		http.Error(w, "Check-out time is required", http.StatusBadRequest)
+		return
+	}
+	if req.CorrectionReason == "" {
+		http.Error(w, "Correction reason is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get admin ID from context (set by auth middleware)
+	adminID := r.Context().Value("user_id")
+	if adminID == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Call service to correct attendance
+	att, err := h.attendanceSvc.CorrectAttendance(r.Context(), id, adminID.(string), req.CheckIn, req.CheckOut, req.CorrectionReason, req.Date)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(att)
 }
 
 // Shift handlers
@@ -480,7 +633,8 @@ func (h *Handler) DeleteShift(w http.ResponseWriter, r *http.Request) {
 // Attendance handlers
 
 type CheckAttendanceRequest struct {
-	DNI string `json:"dni"`
+	DNI      string `json:"dni"`
+	IsRemote bool   `json:"is_remote"`
 }
 
 type CheckAttendanceResponse struct {
@@ -548,6 +702,7 @@ func (h *Handler) CheckAttendance(w http.ResponseWriter, r *http.Request) {
 			Date:       today,
 			CheckIn:    &checkInTime,
 			Late:       late,
+			IsRemote:   req.IsRemote,
 			CreatedAt:  now,
 		}
 
@@ -630,6 +785,13 @@ func (h *Handler) GetEmployeeAttendances(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Get employee for custom hours (if any)
+	emp, err := h.employeeSvc.GetByID(r.Context(), id)
+	if err != nil {
+		http.Error(w, "Employee not found", http.StatusNotFound)
+		return
+	}
+
 	// Check for year/month query params
 	year := r.URL.Query().Get("year")
 	month := r.URL.Query().Get("month")
@@ -639,7 +801,7 @@ func (h *Handler) GetEmployeeAttendances(w http.ResponseWriter, r *http.Request)
 		y, _ := strconv.Atoi(year)
 		m, _ := strconv.Atoi(month)
 
-		summary, err := h.attendanceSvc.CalculateMonthlySummary(r.Context(), id, y, m)
+		summary, err := h.attendanceSvc.CalculateMonthlySummary(r.Context(), id, y, m, emp)
 		if err != nil {
 			http.Error(w, "Failed to get monthly summary", http.StatusInternalServerError)
 			return
@@ -766,6 +928,27 @@ type EmployeeShiftResponse struct {
 	ShiftID    string  `json:"shift_id"`
 	StartDate  string  `json:"start_date"`
 	EndDate    *string `json:"end_date"`
+}
+
+// Attendance correction request
+type CorrectAttendanceRequest struct {
+	Date             string `json:"date,omitempty"`
+	CheckIn          string `json:"check_in"`
+	CheckOut         string `json:"check_out"`
+	CorrectionReason string `json:"correction_reason"`
+}
+
+// Special report request
+type SpecialReportRequest struct {
+	EmployeeID    string `json:"employee_id"`
+	Header        string `json:"header,omitempty"`
+	CustomText    string `json:"custom_text"`
+	IncludeDays   bool   `json:"include_days"`
+	IncludeHours  bool   `json:"include_hours"`
+	IncludeMonths bool   `json:"include_months"`
+	IncludePeriod bool   `json:"include_period"`
+	StartDate     string `json:"start_date,omitempty"`
+	EndDate       string `json:"end_date,omitempty"`
 }
 
 func (h *Handler) AssignShift(w http.ResponseWriter, r *http.Request) {
@@ -895,7 +1078,555 @@ func (h *Handler) GetEmployeeShifts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(resp)
+}
+
+// Report handlers
+
+func (h *Handler) GetAttendanceReport(w http.ResponseWriter, r *http.Request) {
+	startDate := r.URL.Query().Get("start_date")
+	endDate := r.URL.Query().Get("end_date")
+	employeeID := r.URL.Query().Get("employee_id")
+
+	if startDate == "" || endDate == "" {
+		http.Error(w, "start_date and end_date are required", http.StatusBadRequest)
+		return
+	}
+
+	var attendances []*domain.Attendance
+	var err error
+
+	if employeeID != "" {
+		attendances, err = h.attendanceSvc.GetByEmployeeAndDateRange(r.Context(), employeeID, startDate, endDate)
+	} else {
+		attendances, err = h.attendanceSvc.GetByDateRange(r.Context(), startDate, endDate)
+	}
+
+	if err != nil {
+		http.Error(w, "Failed to get attendance report", http.StatusInternalServerError)
+		return
+	}
+
+	employees, err := h.employeeSvc.List(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get employees", http.StatusInternalServerError)
+		return
+	}
+
+	empMap := make(map[string]*domain.Employee)
+	for _, emp := range employees {
+		empMap[emp.ID] = emp
+	}
+
+	shiftMap := make(map[string]*domain.Shift)
+	shifts, _ := h.shiftSvc.List(r.Context())
+	for _, s := range shifts {
+		shiftMap[s.ID] = s
+	}
+
+	empShiftMap := make(map[string]string)
+	assignments, _ := h.employeeShiftSvc.GetByEmployeeID(r.Context(), "")
+	for _, a := range assignments {
+		if a.EndDate == nil || *a.EndDate >= startDate {
+			empShiftMap[a.EmployeeID] = a.ShiftID
+		}
+	}
+
+	report := make([]domain.AttendanceReport, 0, len(attendances))
+	for _, att := range attendances {
+		emp := empMap[att.EmployeeID]
+		empName := ""
+		dni := ""
+		if emp != nil {
+			empName = emp.FirstName + " " + emp.LastName
+			dni = emp.DNI
+		}
+
+		shiftName := ""
+		if shiftID, ok := empShiftMap[att.EmployeeID]; ok {
+			if s := shiftMap[shiftID]; s != nil {
+				shiftName = s.Name
+			}
+		}
+
+		var workedHours float64
+		if att.WorkedHours != nil {
+			workedHours = *att.WorkedHours
+		}
+
+		var checkIn, checkOut string
+		if att.CheckIn != nil {
+			checkIn = *att.CheckIn
+		}
+		if att.CheckOut != nil {
+			checkOut = *att.CheckOut
+		}
+
+		report = append(report, domain.AttendanceReport{
+			EmployeeID:   att.EmployeeID,
+			EmployeeName: empName,
+			DNI:          dni,
+			Date:         att.Date,
+			CheckIn:      checkIn,
+			CheckOut:     checkOut,
+			WorkedHours:  workedHours,
+			IsLate:       att.Late,
+			ShiftName:    shiftName,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(report)
+}
+
+func (h *Handler) GetMonthlyReport(w http.ResponseWriter, r *http.Request) {
+	employeeID := r.URL.Query().Get("employee_id")
+	yearStr := r.URL.Query().Get("year")
+	monthStr := r.URL.Query().Get("month")
+
+	if employeeID == "" {
+		http.Error(w, "employee_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if yearStr == "" || monthStr == "" {
+		http.Error(w, "year and month are required", http.StatusBadRequest)
+		return
+	}
+
+	// Get employee first to check for custom hours
+	emp, err := h.employeeSvc.GetByID(r.Context(), employeeID)
+	if err != nil {
+		http.Error(w, "Employee not found", http.StatusNotFound)
+		return
+	}
+
+	year, _ := strconv.Atoi(yearStr)
+	month, _ := strconv.Atoi(monthStr)
+
+	summary, err := h.attendanceSvc.CalculateMonthlySummary(r.Context(), employeeID, year, month, emp)
+	if err != nil {
+		http.Error(w, "Failed to calculate monthly report", http.StatusInternalServerError)
+		return
+	}
+
+	summary.EmployeeID = emp.FirstName + " " + emp.LastName
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(summary)
+}
+
+func (h *Handler) GetLateArrivalsReport(w http.ResponseWriter, r *http.Request) {
+	startDate := r.URL.Query().Get("start_date")
+	endDate := r.URL.Query().Get("end_date")
+
+	if startDate == "" || endDate == "" {
+		http.Error(w, "start_date and end_date are required", http.StatusBadRequest)
+		return
+	}
+
+	attendances, err := h.attendanceSvc.GetLateArrivals(r.Context(), startDate, endDate)
+	if err != nil {
+		http.Error(w, "Failed to get late arrivals report", http.StatusInternalServerError)
+		return
+	}
+
+	employees, err := h.employeeSvc.List(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get employees", http.StatusInternalServerError)
+		return
+	}
+
+	empMap := make(map[string]*domain.Employee)
+	for _, emp := range employees {
+		empMap[emp.ID] = emp
+	}
+
+	report := make([]domain.LateArrivalReport, 0, len(attendances))
+	for _, att := range attendances {
+		emp := empMap[att.EmployeeID]
+		empName := ""
+		dni := ""
+		if emp != nil {
+			empName = emp.FirstName + " " + emp.LastName
+			dni = emp.DNI
+		}
+
+		checkIn := ""
+		if att.CheckIn != nil {
+			checkIn = *att.CheckIn
+		}
+
+		lateMinutes := 0
+		if att.CheckIn != nil {
+			assignment, _ := h.employeeShiftSvc.GetCurrentByEmployeeID(r.Context(), att.EmployeeID)
+			if assignment != nil {
+				shift, _ := h.shiftSvc.GetByID(r.Context(), assignment.ShiftID)
+				if shift != nil {
+					lateMinutes = calculateLateMinutes(checkIn, shift.StartTime)
+				}
+			}
+		}
+
+		report = append(report, domain.LateArrivalReport{
+			EmployeeID:   att.EmployeeID,
+			EmployeeName: empName,
+			DNI:          dni,
+			Date:         att.Date,
+			CheckIn:      checkIn,
+			LateMinutes:  lateMinutes,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(report)
+}
+
+func (h *Handler) GetOvertimeReport(w http.ResponseWriter, r *http.Request) {
+	employeeID := r.URL.Query().Get("employee_id")
+	startDate := r.URL.Query().Get("start_date")
+	endDate := r.URL.Query().Get("end_date")
+	minHoursStr := r.URL.Query().Get("min_hours")
+
+	if startDate == "" || endDate == "" {
+		http.Error(w, "start_date and end_date are required", http.StatusBadRequest)
+		return
+	}
+
+	minHours := 8.0
+	if minHoursStr != "" {
+		if parsed, err := strconv.ParseFloat(minHoursStr, 64); err == nil {
+			minHours = parsed
+		}
+	}
+
+	var attendances []*domain.Attendance
+	var err error
+
+	if employeeID != "" {
+		attendances, err = h.attendanceSvc.GetOvertimeHours(r.Context(), employeeID, startDate, endDate, minHours)
+	} else {
+		allAttendances, err := h.attendanceSvc.GetByDateRange(r.Context(), startDate, endDate)
+		if err == nil {
+			for _, att := range allAttendances {
+				if att.WorkedHours != nil && *att.WorkedHours >= minHours {
+					attendances = append(attendances, att)
+				}
+			}
+		}
+	}
+
+	if err != nil {
+		http.Error(w, "Failed to get overtime report", http.StatusInternalServerError)
+		return
+	}
+
+	employees, err := h.employeeSvc.List(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get employees", http.StatusInternalServerError)
+		return
+	}
+
+	empMap := make(map[string]*domain.Employee)
+	for _, emp := range employees {
+		empMap[emp.ID] = emp
+	}
+
+	shiftMap := make(map[string]*domain.Shift)
+	shifts, _ := h.shiftSvc.List(r.Context())
+	for _, s := range shifts {
+		shiftMap[s.ID] = s
+	}
+
+	report := make([]domain.OvertimeReport, 0, len(attendances))
+	for _, att := range attendances {
+		emp := empMap[att.EmployeeID]
+		empName := ""
+		dni := ""
+		if emp != nil {
+			empName = emp.FirstName + " " + emp.LastName
+			dni = emp.DNI
+		}
+
+		shiftName := ""
+		assignment, _ := h.employeeShiftSvc.GetCurrentByEmployeeID(r.Context(), att.EmployeeID)
+		if assignment != nil {
+			if s := shiftMap[assignment.ShiftID]; s != nil {
+				shiftName = s.Name
+			}
+		}
+
+		workedHours := 0.0
+		if att.WorkedHours != nil {
+			workedHours = *att.WorkedHours
+		}
+
+		expectedHours := 8.0
+		if assignment != nil {
+			if s := shiftMap[assignment.ShiftID]; s != nil {
+				expectedHours = s.ExpectedHours
+			}
+		}
+
+		overtimeHours := workedHours - expectedHours
+		if overtimeHours < 0 {
+			overtimeHours = 0
+		}
+
+		var checkIn, checkOut string
+		if att.CheckIn != nil {
+			checkIn = *att.CheckIn
+		}
+		if att.CheckOut != nil {
+			checkOut = *att.CheckOut
+		}
+
+		report = append(report, domain.OvertimeReport{
+			EmployeeID:    att.EmployeeID,
+			EmployeeName:  empName,
+			DNI:           dni,
+			Date:          att.Date,
+			CheckIn:       checkIn,
+			CheckOut:      checkOut,
+			WorkedHours:   workedHours,
+			OvertimeHours: overtimeHours,
+			ShiftName:     shiftName,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(report)
+}
+
+func (h *Handler) GetDashboardSummary(w http.ResponseWriter, r *http.Request) {
+	employees, err := h.employeeSvc.List(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get employees", http.StatusInternalServerError)
+		return
+	}
+
+	today := time.Now().Format("2006-01-02")
+
+	totalEmployees := len(employees)
+	presentToday := 0
+	lateArrivalsToday := 0
+	var totalWorkedHours float64
+
+	shiftMap := make(map[string]*domain.Shift)
+	shifts, _ := h.shiftSvc.List(r.Context())
+	for _, s := range shifts {
+		shiftMap[s.ID] = s
+	}
+
+	for _, emp := range employees {
+		att, err := h.attendanceSvc.GetByEmployeeAndDate(r.Context(), emp.ID, today)
+		if err == nil && att != nil && att.CheckIn != nil {
+			presentToday++
+			if att.WorkedHours != nil {
+				totalWorkedHours += *att.WorkedHours
+			}
+			if att.Late {
+				lateArrivalsToday++
+			}
+		}
+	}
+
+	absentToday := totalEmployees - presentToday
+	averageWorkedHours := 0.0
+	if presentToday > 0 {
+		averageWorkedHours = totalWorkedHours / float64(presentToday)
+	}
+
+	allAttendances, _ := h.attendanceSvc.GetByDateRange(r.Context(), today, today)
+	var totalOvertimeHours float64
+	for _, att := range allAttendances {
+		if att.WorkedHours != nil {
+			assignment, _ := h.employeeShiftSvc.GetCurrentByEmployeeID(r.Context(), att.EmployeeID)
+			if assignment != nil {
+				expected := 8.0
+				if s := shiftMap[assignment.ShiftID]; s != nil {
+					expected = s.ExpectedHours
+				}
+				if *att.WorkedHours > expected {
+					totalOvertimeHours += *att.WorkedHours - expected
+				}
+			}
+		}
+	}
+
+	summary := domain.DashboardSummary{
+		TotalEmployees:     totalEmployees,
+		PresentToday:       presentToday,
+		AbsentToday:        absentToday,
+		LateArrivalsToday:  lateArrivalsToday,
+		TotalWorkedHours:   totalWorkedHours,
+		AverageWorkedHours: averageWorkedHours,
+		TotalOvertimeHours: totalOvertimeHours,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(summary)
+}
+
+func calculateLateMinutes(checkIn, shiftStart string) int {
+	const layout = "2006-01-02T15:04:05"
+	shiftTime, err := time.Parse(layout, "2006-01-02T"+shiftStart+":00")
+	if err != nil {
+		return 0
+	}
+	checkInTime, err := time.Parse(layout, checkIn)
+	if err != nil {
+		return 0
+	}
+	diff := checkInTime.Sub(shiftTime)
+	if diff < 0 {
+		return 0
+	}
+	return int(diff.Minutes())
+}
+
+// ExportMonthlyReport exports the monthly report as a PDF
+func (h *Handler) ExportMonthlyReport(w http.ResponseWriter, r *http.Request) {
+	employeeID := r.URL.Query().Get("employee_id")
+	yearStr := r.URL.Query().Get("year")
+	monthStr := r.URL.Query().Get("month")
+
+	if employeeID == "" {
+		http.Error(w, "employee_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if yearStr == "" || monthStr == "" {
+		http.Error(w, "year and month are required", http.StatusBadRequest)
+		return
+	}
+
+	year, _ := strconv.Atoi(yearStr)
+	month, _ := strconv.Atoi(monthStr)
+
+	// Get employee info
+	emp, err := h.employeeSvc.GetByID(r.Context(), employeeID)
+	if err != nil {
+		http.Error(w, "Employee not found", http.StatusNotFound)
+		return
+	}
+
+	// Calculate monthly summary
+	summary, err := h.attendanceSvc.CalculateMonthlySummary(r.Context(), employeeID, year, month, emp)
+	if err != nil {
+		http.Error(w, "Failed to calculate monthly report", http.StatusInternalServerError)
+		return
+	}
+
+	// Generate PDF
+	pdfBytes, err := h.pdfSvc.GenerateMonthlyReport(emp, summary)
+	if err != nil {
+		log.Printf("Error generating PDF: %v", err)
+		http.Error(w, "Failed to generate PDF", http.StatusInternalServerError)
+		return
+	}
+
+	// Set headers for PDF download
+	monthName := []string{"Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"}
+	filename := fmt.Sprintf("informe_%s_%s_%d.pdf", emp.LastName, monthName[month-1], year)
+
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(pdfBytes)))
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(pdfBytes)
+}
+
+// GenerateSpecialReport generates a special PDF report with custom text
+func (h *Handler) GenerateSpecialReport(w http.ResponseWriter, r *http.Request) {
+	var req SpecialReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.EmployeeID == "" {
+		http.Error(w, "employee_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.CustomText == "" {
+		http.Error(w, "custom_text is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get employee info
+	emp, err := h.employeeSvc.GetByID(r.Context(), req.EmployeeID)
+	if err != nil {
+		http.Error(w, "Employee not found", http.StatusNotFound)
+		return
+	}
+
+	// Calculate summary based on period
+	var summary *domain.MonthlySummary
+	if req.StartDate != "" && req.EndDate != "" {
+		start, err := time.Parse("2006-01-02", req.StartDate)
+		if err != nil {
+			http.Error(w, "Invalid start_date format", http.StatusBadRequest)
+			return
+		}
+		end, err := time.Parse("2006-01-02", req.EndDate)
+		if err != nil {
+			http.Error(w, "Invalid end_date format", http.StatusBadRequest)
+			return
+		}
+
+		summary, err = h.attendanceSvc.CalculateSummaryForPeriod(r.Context(), req.EmployeeID, start, end, emp)
+		if err != nil {
+			http.Error(w, "Failed to calculate summary", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// Default to current month
+		now := time.Now()
+		summary, err = h.attendanceSvc.CalculateSummaryForPeriod(r.Context(), req.EmployeeID, time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC), now, emp)
+		if err != nil {
+			http.Error(w, "Failed to calculate summary", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Generate PDF
+	pdfData := &pdf.SpecialReportData{
+		EmployeeID:    req.EmployeeID,
+		Header:        req.Header,
+		CustomText:    req.CustomText,
+		IncludeDays:   req.IncludeDays,
+		IncludeHours:  req.IncludeHours,
+		IncludeMonths: req.IncludeMonths,
+		IncludePeriod: req.IncludePeriod,
+		StartDate:     req.StartDate,
+		EndDate:       req.EndDate,
+	}
+	pdfBytes, err := h.pdfSvc.GenerateSpecialReport(emp, summary, pdfData)
+	if err != nil {
+		log.Printf("Error generating special PDF: %v", err)
+		http.Error(w, "Failed to generate PDF", http.StatusInternalServerError)
+		return
+	}
+
+	// Set headers for PDF download
+	filename := fmt.Sprintf("informe_especial_%s.pdf", emp.LastName)
+
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(pdfBytes)))
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(pdfBytes)
 }
 
 // Helper function to generate UUID

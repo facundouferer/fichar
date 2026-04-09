@@ -35,6 +35,11 @@ func main() {
 	defer db.Close()
 	log.Println("Database connected successfully")
 
+	// Verify database connectivity and set initial health status
+	if err := db.GetPool().Ping(ctx); err != nil {
+		log.Printf("WARNING: Database ping failed: %v", err)
+	}
+
 	// Initialize repositories
 	pool := db.GetPool()
 	employeeRepo := postgres.NewEmployeeRepo(pool)
@@ -54,6 +59,9 @@ func main() {
 	// Initialize handlers
 	h := handler.NewHandler(employeeSvc, shiftSvc, attendanceSvc, logSvc, employeeShiftSvc)
 	authH := handler.NewAuthHandler(authSvc)
+
+	// Set database health status to true (we successfully connected)
+	h.SetDBHealthy(true)
 
 	// Create routers
 	publicMux := http.NewServeMux()
@@ -80,10 +88,20 @@ func main() {
 	adminMux.HandleFunc("GET /api/admin/logs", h.GetLogs)
 	adminMux.HandleFunc("POST /api/admin/employee-shifts", h.AssignShift)
 	adminMux.HandleFunc("GET /api/admin/employees/{id}/shifts", h.GetEmployeeShifts)
+	adminMux.HandleFunc("PUT /api/admin/attendances/{id}/correct", h.CorrectAttendance)
 
 	// Employee routes (authenticated)
 	employeeMux.HandleFunc("GET /api/employees/{id}", h.GetEmployee)
 	employeeMux.HandleFunc("GET /api/employees/{id}/attendances", h.GetEmployeeAttendances)
+
+	// Report routes (ADMIN role required)
+	adminMux.HandleFunc("GET /api/reports/attendance", h.GetAttendanceReport)
+	adminMux.HandleFunc("GET /api/reports/monthly", h.GetMonthlyReport)
+	adminMux.HandleFunc("GET /api/reports/late-arrivals", h.GetLateArrivalsReport)
+	adminMux.HandleFunc("GET /api/reports/overtime", h.GetOvertimeReport)
+	adminMux.HandleFunc("GET /api/reports/dashboard", h.GetDashboardSummary)
+	adminMux.HandleFunc("GET /api/reports/monthly/export-pdf", h.ExportMonthlyReport)
+	adminMux.HandleFunc("POST /api/reports/special", h.GenerateSpecialReport)
 
 	// Apply auth middleware
 	authMiddleware := middleware.AuthMiddleware(authSvc)
@@ -103,6 +121,8 @@ func main() {
 		adminHandler:     adminHandler,
 		employeeHandler:  employeeHandler,
 		healthHandler:    h.Health,
+		readyHandler:     h.Ready,
+		metricsHandler:   h.Metrics,
 		rateLimiter:      rateLimiter,
 	}
 
@@ -157,15 +177,27 @@ type Router struct {
 	adminHandler     http.Handler
 	employeeHandler  http.Handler
 	healthHandler    func(http.ResponseWriter, *http.Request)
+	readyHandler     func(http.ResponseWriter, *http.Request)
+	metricsHandler   func(http.ResponseWriter, *http.Request)
 	rateLimiter      *middleware.RateLimiter
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
 
-	// Health check
-	if path == "/health" {
+	// Health check endpoints (liveness and readiness)
+	if path == "/health" || path == "/health/live" {
 		r.healthHandler(w, req)
+		return
+	}
+
+	if path == "/health/ready" {
+		r.readyHandler(w, req)
+		return
+	}
+
+	if path == "/metrics" {
+		r.metricsHandler(w, req)
 		return
 	}
 
@@ -194,7 +226,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Admin routes - require ADMIN role
-	if strings.HasPrefix(path, "/api/admin/") {
+	if strings.HasPrefix(path, "/api/admin/") || strings.HasPrefix(path, "/api/reports/") {
 		r.adminHandler.ServeHTTP(w, req)
 		return
 	}

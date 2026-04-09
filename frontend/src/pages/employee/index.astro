@@ -1,0 +1,328 @@
+---
+import EmployeeLayout from '../../layouts/EmployeeLayout.astro';
+---
+
+<EmployeeLayout>
+  <div class="page">
+    <h1 class="page-title">Mi Estado</h1>
+    <p class="page-subtitle">Tu asistencia de hoy y del mes</p>
+
+    <div class="today-card">
+      <h2 class="section-title">Estado de Hoy</h2>
+      <div class="today-status" id="today-status">
+        <div class="loading">Cargando...</div>
+      </div>
+    </div>
+
+    <div class="quick-stats">
+      <div class="stat-card">
+        <div class="stat-label">Horas este mes</div>
+        <div class="stat-value" id="month-hours">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Llegadas tarde</div>
+        <div class="stat-value" id="late-count">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Estado</div>
+        <div class="stat-value" id="month-status">-</div>
+        <div class="stat-sub" id="month-detail"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2 class="section-title">Información del Empleado</h2>
+      <div class="info-grid">
+        <div class="info-item">
+          <span class="info-label">Nombre</span>
+          <span class="info-value" id="emp-name">Cargando...</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">DNI</span>
+          <span class="info-value" id="emp-dni">Cargando...</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</EmployeeLayout>
+
+<script>
+  import { api, auth, API_URL } from '../../config/api';
+
+  console.log('[DEBUG] Employee dashboard loading...');
+  console.log('[DEBUG] Auth check:', auth.isAuthenticated(), auth.isAdmin());
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    console.log('[DEBUG] DOMContentLoaded fired');
+    
+    const user = auth.getUser();
+    const token = auth.getToken();
+    console.log('[DEBUG] User:', user, 'Token:', token ? 'present' : 'missing');
+    
+    if (!user || !token) {
+      window.location.href = '/login';
+      return;
+    }
+
+    // Set user info
+    const nameEl = document.getElementById('emp-name');
+    const dniEl = document.getElementById('emp-dni');
+    console.log('[DEBUG] Elements found - name:', nameEl, 'dni:', dniEl);
+    if (nameEl) nameEl.textContent = `${user.first_name} ${user.last_name}`;
+    if (dniEl) dniEl.textContent = user.dni;
+
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth() + 1;
+    console.log('[DEBUG] API_URL:', API_URL);
+    console.log('[DEBUG] User ID:', user.id);
+
+    try {
+      // Get today's attendance status
+      const todayStr = today.toISOString().split('T')[0];
+      console.log('[DEBUG] Fetching attendances from:', `${API_URL}/api/employees/${user.id}/attendances`);
+      const attResponse = await fetch(`${API_URL}/api/employees/${user.id}/attendances`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      let todayAttendance = null;
+      let monthSummary = null;
+      
+      if (attResponse.ok) {
+        const allAttendances = await attResponse.json();
+        // Find today's attendance
+        todayAttendance = allAttendances.find((a: any) => a.date === todayStr);
+      }
+
+      // Get monthly summary
+      const monthResponse = await fetch(
+        `${API_URL}/api/employees/${user.id}/attendances?year=${year}&month=${month}`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+      
+      if (monthResponse.ok) {
+        monthSummary = await monthResponse.json();
+      }
+
+      // Render today's status
+      const statusDiv = document.getElementById('today-status');
+      if (statusDiv) {
+        if (todayAttendance?.check_in && !todayAttendance?.check_out) {
+          statusDiv.innerHTML = `
+            <div class="status-icon in">
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+              </svg>
+            </div>
+            <div class="status-text">
+              <strong>Entrada Registrada</strong>
+              <span>${todayAttendance.check_in}</span>
+            </div>
+          `;
+        } else if (todayAttendance?.check_out) {
+          statusDiv.innerHTML = `
+            <div class="status-icon out">
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+              </svg>
+            </div>
+            <div class="status-text">
+              <strong>Jornada Completada</strong>
+              <span>Salida: ${todayAttendance.check_out}</span>
+            </div>
+          `;
+        } else {
+          statusDiv.innerHTML = `
+            <div class="status-icon pending">
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              </svg>
+            </div>
+            <div class="status-text">
+              <strong>Sin Registrar</strong>
+              <span>Registra tu entrada en la página principal</span>
+            </div>
+          `;
+        }
+      }
+
+      // Render month stats
+      if (monthSummary) {
+        const hoursEl = document.getElementById('month-hours');
+        const lateEl = document.getElementById('late-count');
+        const statusEl = document.getElementById('month-status');
+        const detailEl = document.getElementById('month-detail');
+        
+        if (hoursEl) hoursEl.textContent = monthSummary.worked_hours?.toFixed(1) || '0';
+        if (lateEl) lateEl.textContent = monthSummary.late_arrivals?.toString() || '0';
+        
+        const extra = monthSummary.extra_hours || 0;
+        const missing = monthSummary.missing_hours || 0;
+        
+        let statusText = 'En tiempo';
+        let detailText = '';
+        
+        if (extra > 0) {
+          statusText = 'Horas Extra';
+          detailText = `+${extra.toFixed(1)}h`;
+        } else if (missing > 0) {
+          statusText = 'Pendiente';
+          detailText = `-${missing.toFixed(1)}h`;
+        }
+        
+        if (statusEl) statusEl.textContent = statusText;
+        if (detailEl) detailEl.textContent = detailText;
+      }
+
+    } catch (e) {
+      console.error('Error loading dashboard:', e);
+    }
+  });
+</script>
+
+<style>
+  .page { max-width: 800px; margin: 0 auto; }
+
+  .page-title {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+  }
+
+  .page-subtitle {
+    color: #64748b;
+    margin: 0.5rem 0 2rem;
+  }
+
+  .today-card {
+    background: white;
+    border-radius: 1rem;
+    padding: 2rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+
+  .today-status {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  .status-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .status-icon.in { background: #dcfce7; color: #16a34a; }
+  .status-icon.out { background: #dbeafe; color: #2563eb; }
+  .status-icon.pending { background: #fef3c7; color: #d97706; }
+
+  .status-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .status-text strong {
+    font-size: 1.125rem;
+    color: #1e293b;
+  }
+
+  .status-text span {
+    color: #64748b;
+    font-size: 0.875rem;
+  }
+
+  .quick-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+
+  .stat-card {
+    background: white;
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+    text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+
+  .stat-label {
+    font-size: 0.75rem;
+    color: #64748b;
+    margin-bottom: 0.5rem;
+  }
+
+  .stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #1e293b;
+  }
+
+  .stat-sub {
+    font-size: 0.75rem;
+    color: #94a3b8;
+  }
+
+  .section {
+    background: white;
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+
+  .section-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #1e293b;
+    margin: 0 0 1rem;
+  }
+
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+
+  .info-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .info-label {
+    font-size: 0.75rem;
+    color: #64748b;
+  }
+
+  .info-value {
+    font-weight: 500;
+    color: #1e293b;
+  }
+
+  .loading {
+    color: #64748b;
+    text-align: center;
+    padding: 2rem;
+  }
+
+  @media (max-width: 640px) {
+    .quick-stats {
+      grid-template-columns: 1fr;
+    }
+    
+    .info-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

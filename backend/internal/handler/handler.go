@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"path"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/facundouferer/fichar/backend/internal/config"
 	"github.com/facundouferer/fichar/backend/internal/domain"
 	"github.com/facundouferer/fichar/backend/internal/middleware"
 	"github.com/facundouferer/fichar/backend/internal/repository/postgres"
@@ -31,6 +33,7 @@ type Handler struct {
 	pdfSvc           *pdf.ReportService
 	dbHealthy        atomic.Bool  // Database health status
 	requestCount     atomic.Int64 // Total requests served
+	officeConfig     config.OfficeConfig
 }
 
 // StartRequestCount increments the request counter (call at start of each request)
@@ -44,6 +47,7 @@ func NewHandler(
 	attendanceSvc *service.AttendanceService,
 	logSvc *service.LogService,
 	employeeShiftSvc *service.EmployeeShiftService,
+	officeConfig config.OfficeConfig,
 ) *Handler {
 	return &Handler{
 		employeeSvc:      employeeSvc,
@@ -53,6 +57,7 @@ func NewHandler(
 		employeeShiftSvc: employeeShiftSvc,
 		pdfSvc:           pdf.NewReportService(),
 		dbHealthy:        atomic.Bool{},
+		officeConfig:     officeConfig,
 	}
 }
 
@@ -633,8 +638,10 @@ func (h *Handler) DeleteShift(w http.ResponseWriter, r *http.Request) {
 // Attendance handlers
 
 type CheckAttendanceRequest struct {
-	DNI      string `json:"dni"`
-	IsRemote bool   `json:"is_remote"`
+	DNI       string   `json:"dni"`
+	IsRemote  bool     `json:"is_remote"`
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
 }
 
 type CheckAttendanceResponse struct {
@@ -664,6 +671,21 @@ func (h *Handler) CheckAttendance(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Employee not found with given DNI", http.StatusNotFound)
 		return
+	}
+
+	// Validate location if not remote
+	if !req.IsRemote {
+		if req.Latitude == nil || req.Longitude == nil {
+			http.Error(w, "Se requiere ubicación para registro presencial", http.StatusBadRequest)
+			return
+		}
+
+		// Calculate distance from office
+		distance := calculateDistance(h.officeConfig.Latitude, h.officeConfig.Longitude, *req.Latitude, *req.Longitude)
+		if distance > h.officeConfig.RadiusKm {
+			http.Error(w, fmt.Sprintf("Debe estar dentro de %dkm de la oficina (distancia: %.2fkm)", int(h.officeConfig.RadiusKm), distance), http.StatusForbidden)
+			return
+		}
 	}
 
 	// Get today's date
@@ -703,6 +725,8 @@ func (h *Handler) CheckAttendance(w http.ResponseWriter, r *http.Request) {
 			CheckIn:    &checkInTime,
 			Late:       late,
 			IsRemote:   req.IsRemote,
+			Latitude:   req.Latitude,
+			Longitude:  req.Longitude,
 			CreatedAt:  now,
 		}
 
@@ -837,6 +861,30 @@ func isLate(checkInTime, shiftStart string, toleranceMinutes int) bool {
 	// Add tolerance
 	shiftTime = shiftTime.Add(time.Duration(toleranceMinutes) * time.Minute)
 	return checkIn.After(shiftTime)
+}
+
+// Helper: calculateDistance calculates distance between two points using Haversine formula
+// Returns distance in kilometers
+func calculateDistance(lat1, lon1, lat2, lon2 float64) float64 {
+	const earthRadius = 6371 // Earth radius in kilometers
+
+	// Convert degrees to radians
+	radLat1 := lat1 * math.Pi / 180
+	radLon1 := lon1 * math.Pi / 180
+	radLat2 := lat2 * math.Pi / 180
+	radLon2 := lon2 * math.Pi / 180
+
+	// Differences
+	dLat := radLat2 - radLat1
+	dLon := radLon2 - radLon1
+
+	// Haversine formula
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(radLat1)*math.Cos(radLat2)*
+			math.Sin(dLon/2)*math.Sin(dLon/2)
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+
+	return earthRadius * c
 }
 
 // Helper: calculateHours calculates hours between two timestamps

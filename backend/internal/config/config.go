@@ -10,6 +10,7 @@ type Config struct {
 	Server   ServerConfig
 	Database DatabaseConfig
 	JWT      JWTConfig
+	Office   OfficeConfig
 }
 
 type ServerConfig struct {
@@ -27,6 +28,12 @@ type DatabaseConfig struct {
 
 type JWTConfig struct {
 	Secret string
+}
+
+type OfficeConfig struct {
+	Latitude  float64
+	Longitude float64
+	RadiusKm  float64
 }
 
 func Load() (*Config, error) {
@@ -47,6 +54,10 @@ func Load() (*Config, error) {
 			dbCfg.User, dbCfg.Password, dbCfg.Host, dbCfg.Port, dbCfg.DBName)
 	}
 
+	officeLat, _ := strconv.ParseFloat(getEnv("OFFICE_LATITUDE", "-27.46768274122434"), 64)
+	officeLng, _ := strconv.ParseFloat(getEnv("OFFICE_LONGITUDE", "-58.98517836698102"), 64)
+	officeRadius, _ := strconv.ParseFloat(getEnv("OFFICE_RADIUS_KM", "5"), 64)
+
 	return &Config{
 		Server: ServerConfig{
 			Port: getEnv("PORT", "8080"),
@@ -54,6 +65,11 @@ func Load() (*Config, error) {
 		Database: dbCfg,
 		JWT: JWTConfig{
 			Secret: getEnv("JWT_SECRET", "change-me-in-production"),
+		},
+		Office: OfficeConfig{
+			Latitude:  officeLat,
+			Longitude: officeLng,
+			RadiusKm:  officeRadius,
 		},
 	}, nil
 }

@@ -81,6 +81,47 @@ import Layout from '../layouts/Layout.astro';
     }, 5000);
   }
 
+  // Get user's GPS coordinates
+  async function getLocation(): Promise<{ latitude: number; longitude: number }> {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error('Su navegador no soporta geolocalización'));
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          });
+        },
+        (error) => {
+          let message: string;
+          switch (error.code) {
+            case error.PERMISSION_DENIED:
+              message = 'Se requiere ubicación para registrar asistencia. Por favor permita el acceso a su ubicación.';
+              break;
+            case error.POSITION_UNAVAILABLE:
+              message = 'Ubicación no disponible en este dispositivo';
+              break;
+            case error.TIMEOUT:
+              message = 'Tiempo de espera para obtener ubicación agotado';
+              break;
+            default:
+              message = 'Error al obtener ubicación';
+          }
+          reject(new Error(message));
+        },
+        {
+          timeout: 10000,
+          enableHighAccuracy: true,
+          maximumAge: 0,
+        }
+      );
+    });
+  }
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     
@@ -91,7 +132,11 @@ import Layout from '../layouts/Layout.astro';
     resultDiv.style.display = 'none';
 
     try {
-      const response = await api.checkAttendance(dni);
+      // Request GPS location first
+      const location = await getLocation();
+      
+      // Submit with location data
+      const response = await api.checkAttendance(dni, location.latitude, location.longitude);
       showResult(true, response.message, response.operation);
       dniInput.value = '';
     } catch (error) {

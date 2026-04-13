@@ -181,12 +181,12 @@ func NewAttendanceRepo(pool *pgxpool.Pool) *AttendanceRepo {
 
 func (r *AttendanceRepo) Create(ctx context.Context, att *domain.Attendance) error {
 	query := `
-		INSERT INTO attendances (id, employee_id, date, check_in, check_out, worked_hours, late, is_remote, corrected, correction_reason, corrected_by, corrected_at, created_at)
-		VALUES ($1, $2, $3::date, $4::timestamp, $5::timestamp, $6, $7, $8, $9, $10, $11, $12, $13)
+		INSERT INTO attendances (id, employee_id, date, check_in, check_out, worked_hours, late, is_remote, latitude, longitude, corrected, correction_reason, corrected_by, corrected_at, created_at)
+		VALUES ($1, $2, $3::date, $4::timestamp, $5::timestamp, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 	`
 	_, err := r.pool.Exec(ctx, query,
 		att.ID, att.EmployeeID, att.Date, att.CheckIn, att.CheckOut, att.WorkedHours, att.Late,
-		att.IsRemote, att.Corrected, att.CorrectionReason, att.CorrectedBy, att.CorrectedAt, att.CreatedAt)
+		att.IsRemote, att.Latitude, att.Longitude, att.Corrected, att.CorrectionReason, att.CorrectedBy, att.CorrectedAt, att.CreatedAt)
 	return err
 }
 

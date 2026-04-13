@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/facundouferer/fichar/backend/internal/config"
 	"github.com/facundouferer/fichar/backend/internal/domain"
 	"github.com/facundouferer/fichar/backend/internal/service"
 )
@@ -307,7 +308,13 @@ func createTestHandlerWithMocks() *Handler {
 	attSvc := service.NewAttendanceService(mockAttRepo, mockEmpRepo, shiftSvc, empShiftSvc)
 	logSvc := service.NewLogService(mockLogRepo)
 
-	return NewHandler(empSvc, shiftSvc, attSvc, logSvc, empShiftSvc)
+	officeConfig := config.OfficeConfig{
+		Latitude:  -27.46768274122434,
+		Longitude: -58.98517836698102,
+		RadiusKm:  5,
+	}
+
+	return NewHandler(empSvc, shiftSvc, attSvc, logSvc, empShiftSvc, officeConfig)
 }
 
 // Simple mock implementations for repositories

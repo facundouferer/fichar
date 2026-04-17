@@ -676,14 +676,22 @@ func (h *Handler) CheckAttendance(w http.ResponseWriter, r *http.Request) {
 	// Validate location if not remote
 	if !req.IsRemote {
 		if req.Latitude == nil || req.Longitude == nil {
-			http.Error(w, "Se requiere ubicación para registro presencial", http.StatusBadRequest)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"message": "Se requiere ubicación GPS para registrar asistencia presencial. Por favor permite el acceso a tu ubicación.",
+			})
 			return
 		}
 
 		// Calculate distance from office
 		distance := calculateDistance(h.officeConfig.Latitude, h.officeConfig.Longitude, *req.Latitude, *req.Longitude)
 		if distance > h.officeConfig.RadiusKm {
-			http.Error(w, fmt.Sprintf("Debe estar dentro de %dkm de la oficina (distancia: %.2fkm)", int(h.officeConfig.RadiusKm), distance), http.StatusForbidden)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(map[string]string{
+				"message": fmt.Sprintf("Debes estar dentro de la oficina para registrarte presencialmente. Tu ubicación actual está a %.1fkm de distancia.", distance),
+			})
 			return
 		}
 	}

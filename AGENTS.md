@@ -227,3 +227,68 @@ if (!element) {
   throw new Error('Canvas not found');
 }
 ```
+
+---
+
+## Local Development Setup (Hot Reload)
+
+**AVOID rebuilding Docker images for every change.** Use local development with hot reload instead.
+
+### Backend (Go)
+
+```bash
+# 1. Keep PostgreSQL running in Docker
+docker-compose up -d postgres
+
+# 2. Run with hot reload (from backend/ directory)
+air
+```
+
+- `air` auto-restarts on Go file changes
+- Backend available at `http://localhost:8080`
+
+### Frontend (Astro)
+
+```bash
+# 1. Install dependencies (first time only)
+cd frontend && npm install
+
+# 2. Stop Docker frontend to avoid port conflict
+docker-compose stop frontend
+
+# 3. Run dev server with hot reload
+npm run dev
+```
+
+- Frontend available at `http://localhost:4321`
+- API_URL auto-detects localhost for local development
+
+### Development Workflow
+
+```bash
+# Terminal 1: PostgreSQL + Backend with hot reload
+docker-compose up -d postgres
+cd backend && air
+
+# Terminal 2: Frontend dev server
+cd frontend && npm run dev
+```
+
+### Quick Testing
+
+Test API endpoints directly:
+```bash
+curl -X POST http://localhost:8080/api/attendance/check \
+  -H "Content-Type: application/json" \
+  -d '{"dni":"00000000","latitude":-27.46,"longitude":-58.98}'
+```
+
+---
+
+## Important Notes for Agents
+
+1. **Prefer local development over Docker rebuilds** - Use `air` and `npm run dev` for faster iteration
+2. **Always test changes locally first** before committing
+3. **Rebuild Docker only when necessary** - e.g., after adding new dependencies or changing Dockerfile
+4. **Commit documentation updates** - Keep README.md and AGENTS.md in sync with actual workflows
+5. **Update `.air.toml`** if new build flags or paths are added to the backend

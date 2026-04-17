@@ -57,7 +57,7 @@ func main() {
 	authSvc := service.NewAuthService(employeeRepo, cfg.JWT.Secret)
 
 	// Initialize handlers
-	h := handler.NewHandler(employeeSvc, shiftSvc, attendanceSvc, logSvc, employeeShiftSvc)
+	h := handler.NewHandler(employeeSvc, shiftSvc, attendanceSvc, logSvc, employeeShiftSvc, cfg.Office)
 	authH := handler.NewAuthHandler(authSvc)
 
 	// Set database health status to true (we successfully connected)

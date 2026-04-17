@@ -124,13 +124,20 @@ export interface LoginResponse {
 
 // API Service for Fichar
 export const api = {
-  async checkAttendance(dni: string): Promise<CheckAttendanceResponse> {
+  async checkAttendance(dni: string, latitude?: number, longitude?: number): Promise<CheckAttendanceResponse> {
+    const body: Record<string, unknown> = { dni };
+    
+    if (latitude !== undefined && longitude !== undefined) {
+      body.latitude = latitude;
+      body.longitude = longitude;
+    }
+    
     const response = await fetch(`${API_URL}/api/attendance/check`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ dni }),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {

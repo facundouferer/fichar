@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS attendances (
     worked_hours NUMERIC(4, 2),
     late BOOLEAN DEFAULT FALSE,
     is_remote BOOLEAN DEFAULT FALSE,
+    latitude DECIMAL(10, 8),
+    longitude DECIMAL(11, 8),
     corrected BOOLEAN DEFAULT FALSE,
     correction_reason TEXT,
     corrected_by UUID REFERENCES employees(id),

@@ -51,6 +51,8 @@ type Attendance struct {
 	WorkedHours      *float64   `json:"worked_hours"`
 	Late             bool       `json:"late"`
 	IsRemote         bool       `json:"is_remote"`
+	Latitude         *float64   `json:"latitude"`
+	Longitude        *float64   `json:"longitude"`
 	Corrected        bool       `json:"corrected"`
 	CorrectionReason *string    `json:"correction_reason"`
 	CorrectedBy      *string    `json:"corrected_by"`

@@ -1,43 +1,136 @@
-# Astro Starter Kit: Minimal
+# Fichar - Sistema de Control de Asistencia
 
-```sh
-npm create astro@latest -- --template minimal
+Sistema de control de asistencia con autenticación basada en ubicación GPS.
+
+## Tech Stack
+
+- **Backend**: Go (Golang)
+- **Frontend**: Astro
+- **Database**: PostgreSQL
+- **Infrastructure**: Docker + docker-compose
+
+## Quick Start
+
+```bash
+# Start all services
+docker-compose up -d
+
+# Access the app
+open http://localhost:4321
 ```
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+## Development Setup
 
-## 🚀 Project Structure
+### Backend (Go with Hot Reload)
 
-Inside of your Astro project, you'll see the following folders and files:
-
-```text
-/
-├── public/
-├── src/
-│   └── pages/
-│       └── index.astro
-└── package.json
+**1. Keep PostgreSQL running in Docker:**
+```bash
+docker-compose up -d postgres
 ```
 
-Astro looks for `.astro` or `.md` files in the `src/pages/` directory. Each page is exposed as a route based on its file name.
+**2. Run backend with hot reload:**
+```bash
+cd backend
+air
+```
 
-There's nothing special about `src/components/`, but that's where we like to put any Astro/React/Vue/Svelte/Preact components.
+The backend will be available at `http://localhost:8080`.
 
-Any static assets, like images, can be placed in the `public/` directory.
+Changes to Go files will automatically restart the server.
 
-## 🧞 Commands
+### Frontend (Astro with Hot Reload)
 
-All commands are run from the root of the project, from a terminal:
+**1. Install dependencies:**
+```bash
+cd frontend
+npm install
+```
 
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
+**2. Run dev server:**
+```bash
+npm run dev
+```
 
-## 👀 Want to learn more?
+The frontend will be available at `http://localhost:4321`.
 
-Feel free to check [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).
+Changes to Astro/TypeScript files will automatically refresh.
+
+### Running Backend + Frontend Together
+
+```bash
+# Terminal 1: PostgreSQL + Backend with hot reload
+docker-compose up -d postgres
+cd backend && air
+
+# Terminal 2: Frontend dev server
+cd frontend && npm run dev
+```
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/attendance/check` | Register check-in/out by DNI |
+| POST | `/api/auth/login` | Admin/Employee login |
+| GET | `/api/employees/{id}/attendances` | Get employee attendance |
+| POST | `/api/admin/employees` | Create employee |
+| POST | `/api/admin/shifts` | Create shift |
+| POST | `/api/admin/employee-shifts` | Assign shift to employee |
+| GET | `/api/reports/monthly` | Generate monthly report |
+
+## Environment Variables
+
+### Backend
+```env
+POSTGRES_DB=fichar
+POSTGRES_USER=fichar_user
+POSTGRES_PASSWORD=changeme
+DATABASE_URL=postgres://fichar_user:changeme@localhost:5432/fichar?sslmode=disable
+JWT_SECRET=change-me-in-production
+OFFICE_LATITUDE=-27.46768274122434
+OFFICE_LONGITUDE=-58.98517836698102
+OFFICE_RADIUS_KM=5
+```
+
+### Frontend
+```env
+PUBLIC_API_URL=http://localhost:8080
+```
+
+## Docker Commands
+
+```bash
+# Start all services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop all services
+docker-compose down
+
+# Rebuild services
+docker-compose up -d --build
+
+# Stop and remove volumes (clean slate)
+docker-compose down -v
+
+# Validate docker-compose configuration
+docker-compose config
+```
+
+## Initial Admin Credentials
+
+- **Username**: `00000000`
+- **Password**: `admin` (must change on first login)
+
+## Database Schema
+
+Tables: `employees`, `shifts`, `employee_shift_assignments`, `attendances`, `logs`
+
+## Architecture
+
+Clean Architecture / Hexagonal with these layers:
+- `cmd/` - Entry points
+- `internal/` - Domain, repository, service, handler, middleware, config
+- `pkg/` - logger, pdf, database utilities

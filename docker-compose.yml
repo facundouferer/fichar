@@ -29,8 +29,8 @@ services:
       PORT: ${BACKEND_PORT:-8080}
       DATABASE_URL: postgres://fichar_user:${POSTGRES_PASSWORD:-changeme}@postgres:5432/fichar?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
-      OFFICE_LATITUDE: ${OFFICE_LATITUDE:-27.46768274122434}
-      OFFICE_LONGITUDE: ${OFFICE_LONGITUDE:-58.98517836698102}
+      OFFICE_LATITUDE: ${OFFICE_LATITUDE}
+      OFFICE_LONGITUDE: ${OFFICE_LONGITUDE}
       OFFICE_RADIUS_KM: ${OFFICE_RADIUS_KM:-5}
     depends_on:
       postgres:

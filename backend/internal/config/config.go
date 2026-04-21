@@ -54,8 +54,8 @@ func Load() (*Config, error) {
 			dbCfg.User, dbCfg.Password, dbCfg.Host, dbCfg.Port, dbCfg.DBName)
 	}
 
-	officeLat, _ := strconv.ParseFloat(getEnv("OFFICE_LATITUDE", "-27.46768274122434"), 64)
-	officeLng, _ := strconv.ParseFloat(getEnv("OFFICE_LONGITUDE", "-58.98517836698102"), 64)
+	officeLat, _ := strconv.ParseFloat(getEnv("OFFICE_LATITUDE", "0"), 64)
+	officeLng, _ := strconv.ParseFloat(getEnv("OFFICE_LONGITUDE", "0"), 64)
 	officeRadius, _ := strconv.ParseFloat(getEnv("OFFICE_RADIUS_KM", "5"), 64)
 
 	return &Config{

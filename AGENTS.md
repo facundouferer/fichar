@@ -82,7 +82,7 @@ docker-compose config
 
 **Services**:
 - `postgres`: PostgreSQL database on port 5432
-- `backend`: Go API on port 8080
+- `backend`: Go API on port 8082
 - `frontend`: Astro UI on port 4321
 
 **Initial Admin**: set during first run or via seed script
@@ -246,7 +246,7 @@ air
 ```
 
 - `air` auto-restarts on Go file changes
-- Backend available at `http://localhost:8080`
+- Backend available at `http://localhost:8082`
 
 ### Frontend (Astro)
 
@@ -279,7 +279,7 @@ cd frontend && npm run dev
 
 Test API endpoints directly:
 ```bash
-curl -X POST http://localhost:8080/api/attendance/check \
+curl -X POST http://localhost:8082/api/attendance/check \
   -H "Content-Type: application/json" \
   -d '{"dni":"00000000","latitude":-27.46,"longitude":-58.98}'
 ```

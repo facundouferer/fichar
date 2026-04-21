@@ -367,7 +367,7 @@ import AdminLayout from '../../layouts/AdminLayout.astro';
     const checkOut = `${date}T${checkOutTime}:00`;
 
     try {
-      const response = await fetch(`${(window as any).API_URL || 'http://localhost:8080'}/api/admin/attendances/${attendanceId}/correct`, {
+      const response = await fetch(`${(window as any).API_URL || 'http://localhost:8082'}/api/admin/attendances/${attendanceId}/correct`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

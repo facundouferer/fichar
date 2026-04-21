@@ -1,12 +1,12 @@
-// PUBLIC_API_URL is set at build time via .env file (PUBLIC_API_URL=http://backend:8080)
+// PUBLIC_API_URL is set at build time via .env file (PUBLIC_API_URL=http://backend:8082)
 // Vite replaces this with the actual value during build
-// If not set or running locally, default to localhost:8080
+// If not set or running locally, default to localhost:8082
 const envApiUrl = (import.meta as any).env?.PUBLIC_API_URL;
 
 // For local development (localhost), use localhost. For production Docker, use the Docker network name.
 export const API_URL = (typeof window !== 'undefined' && window.location.hostname === 'localhost') 
-  ? 'http://localhost:8080' 
-  : (envApiUrl || 'http://localhost:8080');
+  ? 'http://localhost:8082' 
+  : (envApiUrl || 'http://localhost:8082');
 
 export interface Employee {
   id: string;

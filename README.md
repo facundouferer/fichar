@@ -55,7 +55,7 @@ docker-compose up -d postgres
 cd backend && air
 ```
 
-El backend corre en `http://localhost:8080`.
+El backend corre en `http://localhost:8082`.
 
 ### Frontend con hot-reload
 
@@ -111,7 +111,7 @@ OFFICE_RADIUS_KM=5
 ### Frontend
 
 ```env
-PUBLIC_API_URL=http://localhost:8080
+PUBLIC_API_URL=http://localhost:8082
 ```
 
 ---

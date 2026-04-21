@@ -20,6 +20,6 @@ WORKDIR /root/
 
 COPY --from=builder /fichar-backend .
 
-EXPOSE 8080
+EXPOSE 8082
 
 CMD ["./fichar-backend"]

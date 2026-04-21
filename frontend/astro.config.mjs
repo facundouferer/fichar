@@ -7,7 +7,7 @@ export default defineConfig({
       emptyOutDir: true
     },
     define: {
-      'import.meta.env.PUBLIC_API_URL': JSON.stringify(process.env.PUBLIC_API_URL || process.env.API_URL || 'http://localhost:8080')
+      'import.meta.env.PUBLIC_API_URL': JSON.stringify(process.env.PUBLIC_API_URL || process.env.API_URL || 'http://localhost:8082')
     }
   }
 });

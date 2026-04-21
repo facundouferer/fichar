@@ -33,7 +33,7 @@ Clean Architecture / Hexagonal with these layers:
 
 Tables: `employees`, `shifts`, `employee_shift_assignments`, `attendances`, `logs`
 
-Initial admin credentials: `admin` / `admin` (must change on first login)
+Initial admin credentials: set during first run or via seed script
 
 ## Key Constraints
 
@@ -85,7 +85,7 @@ docker-compose config
 - `backend`: Go API on port 8080
 - `frontend`: Astro UI on port 4321
 
-**Initial Admin**: `admin` / `admin` (must change on first login)
+**Initial Admin**: set during first run or via seed script
 
 ---
 
@@ -151,6 +151,7 @@ When working on this project, agents **MUST** follow these steps:
    ```
 
 ---
+
 
 ## Code Style Guidelines
 
@@ -292,3 +293,4 @@ curl -X POST http://localhost:8080/api/attendance/check \
 3. **Rebuild Docker only when necessary** - e.g., after adding new dependencies or changing Dockerfile
 4. **Commit documentation updates** - Keep README.md and AGENTS.md in sync with actual workflows
 5. **Update `.air.toml`** if new build flags or paths are added to the backend
+6. **Do not create new branches unless explicitly asked to**

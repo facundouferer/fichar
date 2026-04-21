@@ -1,136 +1,214 @@
-# Fichar - Sistema de Control de Asistencia
+# Fichar — Control de Asistencia
 
-Sistema de control de asistencia con autenticación basada en ubicación GPS.
+Sistema de registro de asistencia laboral con autenticación basada en ubicación GPS. Los empleados registran su ingreso y egreso desde una ubicación autorizada.
+
+## Propósito
+
+- Registrar check-in/check-out de empleados vía DNI
+- Autenticación por ubicación (oficina autorizada)
+- Gestión de turnos y empleados (admin)
+- Reportes mensuales de asistencia
 
 ## Tech Stack
 
 - **Backend**: Go (Golang)
 - **Frontend**: Astro
 - **Database**: PostgreSQL
-- **Infrastructure**: Docker + docker-compose
+- **Infraestructura**: Docker + docker-compose
 
-## Quick Start
+---
+
+## Inicio Rápido
 
 ```bash
-# Start all services
+# Copiar variables de entorno
+cp .env.example .env
+
+# Iniciar servicios
 docker-compose up -d
 
-# Access the app
+# Acceder a la app
 open http://localhost:4321
 ```
 
-## Development Setup
+**Credenciales iniciales:**
+- Usuario: `00000000`
+- Contraseña: `admin` (cambiar en primer login)
 
-### Backend (Go with Hot Reload)
+---
 
-**1. Keep PostgreSQL running in Docker:**
+## Desarrollo Local
+
+### Requisitos
+
+- Docker + docker-compose
+- Node.js >= 22.12.0 (para frontend)
+- Go 1.21+ (para backend)
+
+### Backend con hot-reload
+
 ```bash
+# 1. Mantener PostgreSQL en Docker
 docker-compose up -d postgres
+
+# 2. Ejecutar backend con air
+cd backend && air
 ```
 
-**2. Run backend with hot reload:**
+El backend corre en `http://localhost:8080`.
+
+### Frontend con hot-reload
+
 ```bash
-cd backend
-air
-```
-
-The backend will be available at `http://localhost:8080`.
-
-Changes to Go files will automatically restart the server.
-
-### Frontend (Astro with Hot Reload)
-
-**1. Install dependencies:**
-```bash
-cd frontend
-npm install
-```
-
-**2. Run dev server:**
-```bash
+cd frontend && npm install
 npm run dev
 ```
 
-The frontend will be available at `http://localhost:4321`.
+El frontend corre en `http://localhost:4321`.
 
-Changes to Astro/TypeScript files will automatically refresh.
-
-### Running Backend + Frontend Together
+### Flujo de desarrollo
 
 ```bash
-# Terminal 1: PostgreSQL + Backend with hot reload
+# Terminal 1: PostgreSQL + Backend
 docker-compose up -d postgres
 cd backend && air
 
-# Terminal 2: Frontend dev server
+# Terminal 2: Frontend
 cd frontend && npm run dev
 ```
 
+---
+
 ## API Endpoints
 
-| Method | Endpoint | Description |
+| Método | Endpoint | Descripción |
 |--------|----------|-------------|
-| POST | `/api/attendance/check` | Register check-in/out by DNI |
-| POST | `/api/auth/login` | Admin/Employee login |
-| GET | `/api/employees/{id}/attendances` | Get employee attendance |
-| POST | `/api/admin/employees` | Create employee |
-| POST | `/api/admin/shifts` | Create shift |
-| POST | `/api/admin/employee-shifts` | Assign shift to employee |
-| GET | `/api/reports/monthly` | Generate monthly report |
+| POST | `/api/attendance/check` | Registrar check-in/out por DNI |
+| POST | `/api/auth/login` | Login admin/empleado |
+| GET | `/api/employees/{id}/attendances` | Ver asistencia de empleado |
+| POST | `/api/admin/employees` | Crear empleado |
+| POST | `/api/admin/shifts` | Crear turno |
+| POST | `/api/admin/employee-shifts` | Asignar turno a empleado |
+| GET | `/api/reports/monthly` | Reporte mensual |
 
-## Environment Variables
+---
+
+## Variables de Entorno
 
 ### Backend
+
 ```env
 POSTGRES_DB=fichar
 POSTGRES_USER=fichar_user
 POSTGRES_PASSWORD=changeme
 DATABASE_URL=postgres://fichar_user:changeme@localhost:5432/fichar?sslmode=disable
 JWT_SECRET=change-me-in-production
-OFFICE_LATITUDE=${OFFICE_LATITUDE}
-OFFICE_LONGITUDE=${OFFICE_LONGITUDE}
+OFFICE_LATITUDE=-27.46
+OFFICE_LONGITUDE=-58.98
 OFFICE_RADIUS_KM=5
 ```
 
 ### Frontend
+
 ```env
 PUBLIC_API_URL=http://localhost:8080
 ```
 
-## Docker Commands
+---
+
+## Arquitectura
+
+```
+backend/
+├── cmd/              # Puntos de entrada
+├── internal/
+│   ├── domain/       # Entidades y interfaces
+│   ├── repository/  # Acceso a datos
+│   ├── service/    # Lógica de negocio
+│   ├── handler/    # HTTP handlers
+│   ├── middleware/ # Autenticación, RBAC
+│   └── config/     # Configuración
+└── pkg/             # Utilidades (logger, PDF)
+```
+
+---
+
+## Reglas para Contribuidores
+
+### Commits
+
+Usar [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+feat: add new feature
+fix: resolve a bug
+docs: update documentation
+refactor: restructure without behavior change
+test: add or update tests
+chore: maintenance, deps, config
+```
+
+### Issues
+
+**Antes de crear un issue:**
+1. Buscar si ya existe uno similar
+2. Usar templates de GitHub
+3. Incluir:
+   - Pasos para reproducir
+   - Comportamiento esperado vs actual
+   - Screenshots/logs si aplica
+
+### Pull Requests
+
+**Antes de abrir un PR:**
+1. linkeditar un issue relacionado
+2. Hacer fork del repositorio
+3. Crear branch desde `main`: `git checkout -b feature/descripcion`
+4. Seguir code style del proyecto
+5. Verificar que pasa `docker-compose config`
+
+**En el PR:**
+- Descripción clara del cambio
+- Steps to test
+- Screenshots si hay cambio visual
+
+**No hacer:**
+- PRs sin issue vinculada
+- Commits tipo "fix", "update", "wip"
+- Mezclar múltiples features
+
+### Code Review
+
+- Ser constructivo — explicar el por qué
+- Apretar buenos cambios, no solo encontrar errores
+- Responder en 48hs
+
+---
+
+## Comandos Docker
 
 ```bash
-# Start all services
+# Iniciar servicios
 docker-compose up -d
 
-# View logs
+# Ver logs
 docker-compose logs -f
 
-# Stop all services
+# Detener servicios
 docker-compose down
 
-# Rebuild services
+# Rebuild
 docker-compose up -d --build
 
-# Stop and remove volumes (clean slate)
+# Clean slate
 docker-compose down -v
 
-# Validate docker-compose configuration
+# Validate config
 docker-compose config
 ```
 
-## Initial Admin Credentials
+---
 
-- **Username**: `00000000`
-- **Password**: `admin` (must change on first login)
+## Licencia
 
-## Database Schema
-
-Tables: `employees`, `shifts`, `employee_shift_assignments`, `attendances`, `logs`
-
-## Architecture
-
-Clean Architecture / Hexagonal with these layers:
-- `cmd/` - Entry points
-- `internal/` - Domain, repository, service, handler, middleware, config
-- `pkg/` - logger, pdf, database utilities
+MIT

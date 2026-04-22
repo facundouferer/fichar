@@ -1,0 +1,17 @@
+services:
+  postgres:
+    ports:
+      - "5433:5432"
+
+  backend:
+    environment:
+      PORT: 8080
+
+  frontend:
+    build:
+      args:
+        PUBLIC_API_URL: https://fichar.gar.com.ar
+    environment:
+      HOST: "0.0.0.0"
+    ports:
+      - "4321:4321"

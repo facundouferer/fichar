@@ -26,7 +26,7 @@ services:
       dockerfile: Dockerfile
     container_name: fichar-backend
     environment:
-      PORT: ${BACKEND_PORT:-8080}
+      PORT: ${BACKEND_PORT:-8082}
       DATABASE_URL: postgres://fichar_user:${POSTGRES_PASSWORD:-changeme}@postgres:5432/fichar?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       OFFICE_LATITUDE: ${OFFICE_LATITUDE}
@@ -36,12 +36,12 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "${BACKEND_PORT:-8080}:8080"
+      - "${BACKEND_PORT:-8082}:8082"
     networks:
       - fichar-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8082/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -52,11 +52,11 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        PUBLIC_API_URL: http://backend:8080
+        PUBLIC_API_URL: http://backend:8082
     container_name: fichar-frontend
     environment:
       PORT: ${FRONTEND_PORT:-4321}
-      API_URL: ${API_URL:-http://backend:8080}
+      API_URL: ${API_URL:-http://backend:8082}
     depends_on:
       - backend
     ports:

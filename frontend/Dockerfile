@@ -1,7 +1,7 @@
 # Build stage
 FROM node:22-alpine AS builder
 
-ARG PUBLIC_API_URL=http://backend:8080
+ARG PUBLIC_API_URL=http://backend:8082
 
 WORKDIR /app
 

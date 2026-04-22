@@ -75,19 +75,19 @@ docker-compose healthcheck
 | Servicio | Healthcheck |
 |----------|-------------|
 | postgres | `pg_isready -U fichar_user -d fichar` |
-| backend | `wget -q --spider http://localhost:8080/health` |
+| backend | `wget -q --spider http://localhost:8082/health` |
 
 ### Verificar manualmente los endpoints
 
 ```bash
 # Liveness
-curl http://localhost:8080/health
+curl http://localhost:8082/health
 
 # Readiness (incluye DB)
-curl http://localhost:8080/health/ready
+curl http://localhost:8082/health/ready
 
 # Métricas
-curl http://localhost:8080/metrics
+curl http://localhost:8082/metrics
 ```
 
 ## Lineamientos de Monitoreo
@@ -128,7 +128,7 @@ docker-compose up -d
 docker-compose ps
 
 # Probar endpoints
-curl -f http://localhost:8080/health && echo "OK"
-curl -f http://localhost:8080/health/ready && echo "Ready"
-curl -f http://localhost:8080/metrics && echo "Metrics OK"
+curl -f http://localhost:8082/health && echo "OK"
+curl -f http://localhost:8082/health/ready && echo "Ready"
+curl -f http://localhost:8082/metrics && echo "Metrics OK"
 ```

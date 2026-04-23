@@ -34,6 +34,7 @@ type Handler struct {
 	dbHealthy        atomic.Bool  // Database health status
 	requestCount     atomic.Int64 // Total requests served
 	officeConfig     config.OfficeConfig
+	captchaGen       *middleware.CaptchaGenerator
 }
 
 // StartRequestCount increments the request counter (call at start of each request)
@@ -59,6 +60,21 @@ func NewHandler(
 		dbHealthy:        atomic.Bool{},
 		officeConfig:     officeConfig,
 	}
+}
+
+// NewHandlerWithSecurity creates a handler with captcha support
+func NewHandlerWithSecurity(
+	employeeSvc *service.EmployeeService,
+	shiftSvc *service.ShiftService,
+	attendanceSvc *service.AttendanceService,
+	logSvc *service.LogService,
+	employeeShiftSvc *service.EmployeeShiftService,
+	officeConfig config.OfficeConfig,
+	captchaGen *middleware.CaptchaGenerator,
+) *Handler {
+	h := NewHandler(employeeSvc, shiftSvc, attendanceSvc, logSvc, employeeShiftSvc, officeConfig)
+	h.captchaGen = captchaGen
+	return h
 }
 
 // Health returns basic liveness check (service is running)
@@ -638,19 +654,22 @@ func (h *Handler) DeleteShift(w http.ResponseWriter, r *http.Request) {
 // Attendance handlers
 
 type CheckAttendanceRequest struct {
-	DNI       string   `json:"dni"`
-	IsRemote  bool     `json:"is_remote"`
-	Latitude  *float64 `json:"latitude,omitempty"`
-	Longitude *float64 `json:"longitude,omitempty"`
+	DNI       string                     `json:"dni"`
+	IsRemote  bool                       `json:"is_remote"`
+	Latitude  *float64                   `json:"latitude,omitempty"`
+	Longitude *float64                   `json:"longitude,omitempty"`
+	Captcha   *middleware.CaptchaRequest `json:"captcha,omitempty"`
 }
 
 type CheckAttendanceResponse struct {
-	Operation  string `json:"operation"` // "check_in" or "check_out"
-	EmployeeID string `json:"employee_id"`
-	Date       string `json:"date"`
-	CheckIn    string `json:"check_in,omitempty"`
-	CheckOut   string `json:"check_out,omitempty"`
-	Message    string `json:"message"`
+	Operation      string                       `json:"operation"` // "check_in" or "check_out"
+	EmployeeID     string                       `json:"employee_id"`
+	Date           string                       `json:"date"`
+	CheckIn        string                       `json:"check_in,omitempty"`
+	CheckOut       string                       `json:"check_out,omitempty"`
+	Message        string                       `json:"message"`
+	RequireCaptcha bool                         `json:"require_captcha,omitempty"`
+	Captcha        *middleware.CaptchaChallenge `json:"captcha,omitempty"`
 }
 
 func (h *Handler) CheckAttendance(w http.ResponseWriter, r *http.Request) {
@@ -664,6 +683,20 @@ func (h *Handler) CheckAttendance(w http.ResponseWriter, r *http.Request) {
 	if req.DNI == "" {
 		http.Error(w, "DNI is required", http.StatusBadRequest)
 		return
+	}
+
+	// Validate captcha if provided (optional for attendance)
+	ctx := r.Context()
+	if req.Captcha != nil && req.Captcha.SessionID != "" && h.captchaGen != nil {
+		valid, err := h.captchaGen.Validate(ctx, req.Captcha.SessionID, req.Captcha.Answer)
+		if err != nil || !valid {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(CheckAttendanceResponse{
+				Message: "Invalid captcha",
+			})
+			return
+		}
 	}
 
 	// Find employee by DNI

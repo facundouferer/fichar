@@ -17,6 +17,7 @@ import (
 	"github.com/facundouferer/fichar/backend/internal/repository/postgres"
 	"github.com/facundouferer/fichar/backend/internal/service"
 	"github.com/facundouferer/fichar/backend/pkg/database"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
@@ -35,13 +36,18 @@ func main() {
 	defer db.Close()
 	log.Println("Database connected successfully")
 
+	// Run migrations for security tables
+	pool := db.GetPool()
+	if err := runMigrations(ctx, pool); err != nil {
+		log.Printf("WARNING: Migration failed: %v", err)
+	}
+
 	// Verify database connectivity and set initial health status
-	if err := db.GetPool().Ping(ctx); err != nil {
+	if err := pool.Ping(ctx); err != nil {
 		log.Printf("WARNING: Database ping failed: %v", err)
 	}
 
 	// Initialize repositories
-	pool := db.GetPool()
 	employeeRepo := postgres.NewEmployeeRepo(pool)
 	shiftRepo := postgres.NewShiftRepo(pool)
 	attendanceRepo := postgres.NewAttendanceRepo(pool)
@@ -56,9 +62,21 @@ func main() {
 	logSvc := service.NewLogService(logRepo)
 	authSvc := service.NewAuthService(employeeRepo, cfg.JWT.Secret)
 
-	// Initialize handlers
-	h := handler.NewHandler(employeeSvc, shiftSvc, attendanceSvc, logSvc, employeeShiftSvc, cfg.Office)
-	authH := handler.NewAuthHandler(authSvc)
+	// Initialize security middleware
+	failedLoginConfig := middleware.FailedLoginConfig{
+		MaxAttempts:   5,
+		BlockDuration: 15 * time.Minute,
+	}
+	failedLoginTracker := middleware.NewFailedLoginTracker(pool, failedLoginConfig)
+
+	captchaConfig := middleware.CaptchaConfig{
+		Expiry: 5 * time.Minute,
+	}
+	captchaGen := middleware.NewCaptchaGenerator(pool, captchaConfig)
+
+	// Initialize handlers with security
+	h := handler.NewHandlerWithSecurity(employeeSvc, shiftSvc, attendanceSvc, logSvc, employeeShiftSvc, cfg.Office, captchaGen)
+	authH := handler.NewAuthHandlerWithSecurity(authSvc, failedLoginTracker, captchaGen)
 
 	// Set database health status to true (we successfully connected)
 	h.SetDBHealthy(true)
@@ -106,8 +124,9 @@ func main() {
 	// Apply auth middleware
 	authMiddleware := middleware.AuthMiddleware(authSvc)
 
-	// Rate limiter for public endpoints (5 requests per minute per IP)
-	rateLimiter := middleware.NewRateLimiter(5, time.Minute)
+	// Initialize new rate limiters (per-IP)
+	loginRateLimiter := middleware.RateLimitMiddleware(3, 5)        // 3 req/min for login
+	attendanceRateLimiter := middleware.RateLimitMiddleware(10, 15) // 10 req/min for attendance
 
 	// Wrap with role check
 	adminHandler := authMiddleware(middleware.RequireRole("ADMIN")(adminMux))
@@ -116,14 +135,15 @@ func main() {
 
 	// Custom router to handle path matching properly
 	router := &Router{
-		publicMux:        publicMux,
-		protectedHandler: protectedHandler,
-		adminHandler:     adminHandler,
-		employeeHandler:  employeeHandler,
-		healthHandler:    h.Health,
-		readyHandler:     h.Ready,
-		metricsHandler:   h.Metrics,
-		rateLimiter:      rateLimiter,
+		publicMux:             publicMux,
+		protectedHandler:      protectedHandler,
+		adminHandler:          adminHandler,
+		employeeHandler:       employeeHandler,
+		healthHandler:         h.Health,
+		readyHandler:          h.Ready,
+		metricsHandler:        h.Metrics,
+		loginRateLimiter:      loginRateLimiter,
+		attendanceRateLimiter: attendanceRateLimiter,
 	}
 
 	// Apply CORS and logging
@@ -172,14 +192,15 @@ func main() {
 
 // Router handles path-based routing
 type Router struct {
-	publicMux        *http.ServeMux
-	protectedHandler http.Handler
-	adminHandler     http.Handler
-	employeeHandler  http.Handler
-	healthHandler    func(http.ResponseWriter, *http.Request)
-	readyHandler     func(http.ResponseWriter, *http.Request)
-	metricsHandler   func(http.ResponseWriter, *http.Request)
-	rateLimiter      *middleware.RateLimiter
+	publicMux             *http.ServeMux
+	protectedHandler      http.Handler
+	adminHandler          http.Handler
+	employeeHandler       http.Handler
+	healthHandler         func(http.ResponseWriter, *http.Request)
+	readyHandler          func(http.ResponseWriter, *http.Request)
+	metricsHandler        func(http.ResponseWriter, *http.Request)
+	loginRateLimiter      func(http.Handler) http.Handler
+	attendanceRateLimiter func(http.Handler) http.Handler
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -201,15 +222,27 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Rate limiting for public endpoints (login and attendance check)
-	if req.Method == "POST" && (path == "/api/auth/login" || path == "/api/attendance/check") {
-		// Get client IP for rate limiting
-		clientIP := getClientIP(req)
-		if !r.rateLimiter.Allow(clientIP) {
-			http.Error(w, "Too many requests", http.StatusTooManyRequests)
-			return
+	// Rate limiting for login (3 req/min)
+	if req.Method == "POST" && path == "/api/auth/login" {
+		if r.loginRateLimiter != nil {
+			r.loginRateLimiter(http.HandlerFunc(func(w http.ResponseWriter, reqInner *http.Request) {
+				r.publicMux.ServeHTTP(w, reqInner)
+			})).ServeHTTP(w, req)
+		} else {
+			r.publicMux.ServeHTTP(w, req)
 		}
-		r.publicMux.ServeHTTP(w, req)
+		return
+	}
+
+	// Rate limiting for attendance check (10 req/min)
+	if req.Method == "POST" && path == "/api/attendance/check" {
+		if r.attendanceRateLimiter != nil {
+			r.attendanceRateLimiter(http.HandlerFunc(func(w http.ResponseWriter, reqInner *http.Request) {
+				r.publicMux.ServeHTTP(w, reqInner)
+			})).ServeHTTP(w, req)
+		} else {
+			r.publicMux.ServeHTTP(w, req)
+		}
 		return
 	}
 
@@ -243,11 +276,47 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 // getClientIP extracts the real client IP from request
 func getClientIP(req *http.Request) string {
-	// Check for forwarded header (when behind proxy)
 	forwarded := req.Header.Get("X-Forwarded-For")
 	if forwarded != "" {
 		return strings.Split(forwarded, ",")[0]
 	}
-	// Fall back to remote address
 	return req.RemoteAddr
+}
+
+// runMigrations creates security tables if they don't exist
+func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
+	migrations := []string{
+		`CREATE TABLE IF NOT EXISTS failed_login_attempts (
+			id SERIAL PRIMARY KEY,
+			ip_address VARCHAR(45) NOT NULL,
+			attempt_count INTEGER NOT NULL DEFAULT 1,
+			first_attempt_at TIMESTAMP NOT NULL DEFAULT NOW(),
+			last_attempt_at TIMESTAMP NOT NULL DEFAULT NOW(),
+			blocked_until TIMESTAMP,
+			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+			CONSTRAINT uq_failed_login_ip UNIQUE (ip_address)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_failed_login_ip ON failed_login_attempts(ip_address)`,
+		`CREATE INDEX IF NOT EXISTS idx_failed_login_blocked ON failed_login_attempts(blocked_until) WHERE blocked_until IS NOT NULL`,
+		`CREATE TABLE IF NOT EXISTS captcha_challenges (
+			id SERIAL PRIMARY KEY,
+			session_id VARCHAR(64) NOT NULL UNIQUE,
+			question VARCHAR(50) NOT NULL,
+			answer INTEGER NOT NULL,
+			expires_at TIMESTAMP NOT NULL,
+			created_at TIMESTAMP NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_captcha_session ON captcha_challenges(session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_captcha_expires ON captcha_challenges(expires_at)`,
+	}
+
+	for _, sql := range migrations {
+		if _, err := pool.Exec(ctx, sql); err != nil {
+			return fmt.Errorf("migration failed: %w", err)
+		}
+	}
+
+	log.Println("Security migrations completed")
+	return nil
 }

@@ -1,6 +1,9 @@
 import { defineConfig } from 'astro/config';
 
 export default defineConfig({
+  preview: {
+    allowedHosts: ['fichar.gar.com.ar']
+  },
   vite: {
     build: {
       outDir: 'dist',

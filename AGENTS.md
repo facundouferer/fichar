@@ -1,39 +1,47 @@
 # AGENTS.md
 
-## Project State
+Guia operativa para agentes de codigo en este repositorio.
 
-**Project initialized** - Docker Compose setup complete with PostgreSQL, backend and frontend scaffolding. See `docs/documento_inicial.md` for specification.
+## Estado real del proyecto (verificado)
 
-## Tech Stack
+- Stack activo: Go (backend), Astro + TypeScript (frontend), PostgreSQL, Docker Compose.
+- Hay **dos proyectos Astro**:
+  - `frontend/` (app principal real del sistema).
+  - raiz (`package.json`, `src/pages/index.astro`) de plantilla base.
+- Backend en `backend/` con tests unitarios y de handlers en Go.
+- Infra en `docker-compose.yml` con servicios `postgres`, `backend`, `frontend`.
 
-- **Backend**: Go (Golang)
-- **Frontend**: Astro
-- **Database**: PostgreSQL
-- **Infrastructure**: Docker + docker-compose
+## Mapa rapido
 
-## Architecture
+- `backend/cmd/server/main.go` - bootstrap HTTP + middlewares + rutas.
+- `backend/internal/` - domain, service, handler, middleware, repo.
+- `backend/pkg/` - utilidades compartidas (DB, PDF).
+- `frontend/src/pages/` - vistas Astro (admin y employee).
+- `frontend/src/config/api.ts` - cliente API y tipos del frontend.
+- `database/init/001_schema.sql` - schema inicial.
+- `docs/operations.md` y `docs/testing-strategy.md` - operacion y testing.
 
-Clean Architecture / Hexagonal with these layers:
-- `cmd/` - Entry points
-- `internal/` - Domain, repository, service, handler, middleware, config
-- `pkg/` - logger, pdf, database utilities
+## Cursor / Copilot
 
-## API Endpoints (planned)
+- `.cursor/rules/`: no existe.
+- `.cursorrules`: no existe.
+- `.github/copilot-instructions.md`: no existe.
+- Si aparecen, pasan a ser politica prioritaria y este archivo debe actualizarse.
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/attendance/check` | Register check-in/out by DNI |
-| GET | `/api/employees/{id}/attendances` | Get employee attendance |
-| POST | `/api/admin/employees` | Create employee |
-| POST | `/api/admin/shifts` | Create shift |
-| POST | `/api/admin/employee-shifts` | Assign shift to employee |
-| GET | `/api/reports/monthly` | Generate monthly report |
+## Comandos de build / lint / test
 
-## Database Schema
+## Requisitos generales
 
-Tables: `employees`, `shifts`, `employee_shift_assignments`, `attendances`, `logs`
+- Node: `>=22.12.0` (definido en `package.json` y `frontend/package.json`).
+- Go: `1.23` (definido en `backend/go.mod`).
+- Docker Compose disponible (`docker-compose` en docs/scripts actuales).
 
-Initial admin credentials: set during first run or via seed script
+**Services**:
+- `postgres`: PostgreSQL database on port 5432
+- `backend`: Go API on port 8082
+- `frontend`: Astro UI on port 4321
+
+**Initial Admin**: set during first run or via seed script
 
 ## Key Constraints
 
@@ -57,57 +65,78 @@ This part provides guidelines for AI agents working on this codebase.
 
 ## Build & Development Commands
 
-```bash
-# Setup
-cp .env.example .env  # Copy environment variables
+## Orquestacion con Docker
 
-# Start all services (PostgreSQL, Backend, Frontend)
+```bash
+# Levantar stack completo
 docker-compose up -d
 
-# View logs
+# Ver logs
 docker-compose logs -f
 
-# Stop all services
+# Bajar stack
 docker-compose down
 
-# Rebuild services
+# Rebuild de imagenes
 docker-compose up -d --build
 
-# Stop and remove volumes (for clean slate)
+# Bajar y limpiar volumenes
 docker-compose down -v
 
-# Validate docker-compose configuration
+# Validar compose
 docker-compose config
+
+# Script de validacion
+./validate-compose.sh
 ```
 
-**Services**:
-- `postgres`: PostgreSQL database on port 5432
-- `backend`: Go API on port 8082
-- `frontend`: Astro UI on port 4321
+## Backend (Go)
 
-**Initial Admin**: set during first run or via seed script
+```bash
+# Desarrollo con hot reload
+cd backend && air
 
----
+# Build binario principal
+cd backend && go build -o ./tmp/main ./cmd/server
 
-## Frontend Development
+# Build paquetes
+cd backend && go build ./...
+
+# Test suite completa
+cd backend && go test ./...
+
+# Coverage
+cd backend && go test -cover ./...
+
+# Tests cortos
+cd backend && go test -short ./...
+
+# Vet
+cd backend && go vet ./...
+
+# Formato
+cd backend && gofmt -w .
+```
+
+## Frontend (app principal en `frontend/`)
 
 ```bash
 cd frontend
 
-# Install dependencies
+# Instalar dependencias
 npm install
 
-# Development server
+# Dev server (custom node server)
 npm run dev
 
-# Build for production
+# Build Astro
 npm run build
 
-# Preview production build
+# Preview / run server
 npm run preview
 ```
 
-**Important**: Frontend uses custom Astro build + Express server approach for Docker deployment.
+Nota: hoy no hay script `lint` ni `test` en `frontend/package.json`.
 
 ---
 
@@ -151,7 +180,6 @@ When working on this project, agents **MUST** follow these steps:
    ```
 
 ---
-
 
 ## Code Style Guidelines
 
@@ -259,23 +287,29 @@ docker-compose stop frontend
 
 # 3. Run dev server with hot reload
 npm run dev
+npm run build
+npm run preview
 ```
 
-- Frontend available at `http://localhost:4321`
-- API_URL auto-detects localhost for local development
+## Ejecutar un solo test (muy importante)
 
-### Development Workflow
+## Go (backend)
 
 ```bash
-# Terminal 1: PostgreSQL + Backend with hot reload
-docker-compose up -d postgres
-cd backend && air
+# Un paquete
+cd backend && go test ./internal/service -v
 
-# Terminal 2: Frontend dev server
-cd frontend && npm run dev
+# Un test exacto
+cd backend && go test ./internal/service -run '^TestAuthServiceLogin$' -v
+
+# Otro ejemplo real
+cd backend && go test ./internal/handler -run '^TestHealthEndpoint$' -v
+
+# Por prefijo/patron
+cd backend && go test ./internal/service -run 'TestAuthService' -v
 ```
 
-### Quick Testing
+## Frontend
 
 Test API endpoints directly:
 ```bash
@@ -284,9 +318,9 @@ curl -X POST http://localhost:8082/api/attendance/check \
   -d '{"dni":"00000000","latitude":-27.46,"longitude":-58.98}'
 ```
 
----
+## Convenciones de codigo
 
-## Important Notes for Agents
+## Reglas generales
 
 1. **Prefer local development over Docker rebuilds** - Use `air` and `npm run dev` for faster iteration
 2. **Always test changes locally first** before committing
@@ -294,3 +328,62 @@ curl -X POST http://localhost:8082/api/attendance/check \
 4. **Commit documentation updates** - Keep README.md and AGENTS.md in sync with actual workflows
 5. **Update `.air.toml`** if new build flags or paths are added to the backend
 6. **Do not create new branches unless explicitly asked to**
+
+## Imports
+
+- Go: stdlib -> internos del modulo -> terceros.
+- TS/Astro: externos -> internos absolutos -> relativos.
+- Eliminar imports no usados antes de cerrar tarea.
+
+## Formato
+
+- Go: `gofmt` obligatorio.
+- TS/Astro: respetar estilo actual (2 espacios en `.astro`, semicolons en TS).
+- No introducir otro formatter sin acuerdo del repo.
+
+## Tipos
+
+- Go: structs tipadas para dominio; evitar `interface{}` salvo borde dinamico.
+- TypeScript: evitar `any`; usar tipos concretos o `unknown` + narrowing.
+- Reusar tipos de `frontend/src/config/api.ts` antes de duplicar interfaces.
+
+## Naming
+
+- Go exportado: `PascalCase`; interno: `camelCase`.
+- Tests Go: `TestXxx` / `TestXxx_Scenario`.
+- Astro layouts/componentes: `PascalCase.astro`.
+- Variables JS/TS: `camelCase`; constantes: `UPPER_SNAKE_CASE` solo si aplica.
+
+## Manejo de errores
+
+- Nunca silenciar errores.
+- Backend HTTP: responder con status correcto y mensaje claro.
+- En Go, envolver errores con contexto cuando se propagan.
+- Frontend: capturar async con `try/catch` y mostrar mensaje usable.
+
+## API y seguridad
+
+- Validar input en handlers (body, query, params).
+- Mantener JWT + RBAC (`ADMIN` / `EMPLOYEE`) en capas de middleware.
+- No loggear secretos (`JWT_SECRET`, credenciales, tokens completos).
+- Respetar rate limiting en endpoints publicos.
+
+## Testing
+
+- Cada cambio de logica de negocio requiere test o ajuste de test.
+- Preferir table-driven tests en Go cuando hay multiples escenarios.
+- Tests de handler deben cubrir casos validos + invalidos + bordes.
+
+## Flujo recomendado de desarrollo
+
+1. Levantar `postgres` con Docker.
+2. Ejecutar backend local con `air`.
+3. Ejecutar frontend desde `frontend/` con `npm run dev`.
+4. Correr `go test ./...` en `backend/` antes de cerrar.
+5. Validar compose con `docker-compose config` si tocaste infra.
+
+## Notas para agentes
+
+- No asumir que la app de raiz y `frontend/` son equivalentes; confirmar target.
+- Si agregas scripts (`lint`, `test`, `typecheck`), actualiza este archivo.
+- Si se incorporan reglas Cursor/Copilot, reflejarlas aca inmediatamente.

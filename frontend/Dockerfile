@@ -27,4 +27,4 @@ RUN npm ci --omit=dev
 
 EXPOSE 4321
 
-CMD ["npx", "astro", "preview", "--host", "0.0.0.0", "--port", "4321"]
+CMD ["npx", "astro", "preview", "--host", "0.0.0.0", "--port", "4321", "--allowed-hosts", "fichar.gar.com.ar,www.fichar.gar.com.ar"]

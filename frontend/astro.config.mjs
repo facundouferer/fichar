@@ -2,7 +2,7 @@ import { defineConfig } from 'astro/config';
 
 export default defineConfig({
   preview: {
-    allowedHosts: ['fichar.gar.com.ar']
+    allowedHosts: ['fichar.gar.com.ar', 'www.fichar.gar.com.ar']
   },
   vite: {
     build: {

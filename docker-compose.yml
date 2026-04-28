@@ -57,6 +57,7 @@ services:
     environment:
       PORT: ${FRONTEND_PORT:-4321}
       API_URL: ${API_URL:-http://backend:8082}
+      HOST: 0.0.0.0
     depends_on:
       - backend
     ports:

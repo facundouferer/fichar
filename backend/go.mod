@@ -8,7 +8,7 @@ require (
 	github.com/jackc/pgx/v5 v5.5.5
 	github.com/jung-kurt/gofpdf v1.16.2
 	golang.org/x/crypto v0.17.0
-	golang.org/x/time v0.15.0
+	golang.org/x/time v0.13.0
 )
 
 require (

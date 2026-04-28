@@ -26,17 +26,14 @@ services:
       dockerfile: Dockerfile
     container_name: fichar-backend
     environment:
-      PORT: ${BACKEND_PORT:-8082}
+      SERVER_PORT: "8082"
       DATABASE_URL: postgres://fichar_user:${POSTGRES_PASSWORD:-changeme}@postgres:5432/fichar?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       OFFICE_LATITUDE: ${OFFICE_LATITUDE}
       OFFICE_LONGITUDE: ${OFFICE_LONGITUDE}
       OFFICE_RADIUS_KM: ${OFFICE_RADIUS_KM:-5}
-    depends_on:
-      postgres:
-        condition: service_healthy
     ports:
-      - "${BACKEND_PORT:-8082}:8082"
+      - "8082:8082"
     networks:
       - fichar-network
     restart: unless-stopped
@@ -57,6 +54,7 @@ services:
     environment:
       PORT: ${FRONTEND_PORT:-4321}
       API_URL: ${API_URL:-http://backend:8082}
+      BACKEND_URL: http://backend:8082
       HOST: 0.0.0.0
     depends_on:
       - backend

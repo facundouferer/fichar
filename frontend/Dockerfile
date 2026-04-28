@@ -19,12 +19,14 @@ FROM node:22-alpine AS runner
 
 WORKDIR /app
 
+COPY --from=builder /app/src ./src
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/astro.config.mjs ./astro.config.mjs
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package*.json ./
 
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev && npm install http-proxy
 
 EXPOSE 4321
 
-CMD ["npx", "astro", "preview", "--host", "0.0.0.0", "--port", "4321", "--allowed-hosts", "fichar.gar.com.ar,www.fichar.gar.com.ar"]
+CMD ["node", "src/server/server.cjs"]

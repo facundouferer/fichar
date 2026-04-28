@@ -60,7 +60,7 @@ func Load() (*Config, error) {
 
 	return &Config{
 		Server: ServerConfig{
-			Port: getEnv("PORT", "8082"),
+			Port: getEnv("SERVER_PORT", "8082"),
 		},
 		Database: dbCfg,
 		JWT: JWTConfig{

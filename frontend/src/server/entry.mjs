@@ -7,7 +7,7 @@ import { createReadStream } from 'node:fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const buildDir = join(__dirname, '../dist');
+const buildDir = join(__dirname, '../../dist');
 const indexHtmlPath = join(buildDir, 'index.html');
 
 let indexHtml = '';
@@ -41,8 +41,8 @@ const server = createServer((req, res) => {
   }
   
   if (existsSync(filePath)) {
-    const ext = join(filePath, '.').split('.').pop() || '.html';
-    const contentType = MIME_TYPES[ext] || 'text/plain';
+    const ext = filePath.split('.').pop() || '.html';
+    const contentType = MIME_TYPES['.' + ext] || 'text/html';
     
     res.writeHead(200, { 'Content-Type': contentType });
     createReadStream(filePath).pipe(res);

@@ -2,60 +2,67 @@
 import Layout from '../layouts/Layout.astro';
 ---
 
-<Layout title="Fichar - Login">
-  <main class="container">
-    <div class="logo">
-      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
-        <polyline points="10 17 15 12 10 7"></polyline>
-        <line x1="15" y1="12" x2="3" y2="12"></line>
-      </svg>
-    </div>
-    
-    <h1 class="title">Iniciar Sesión</h1>
-    <p class="subtitle">Ingrese sus credenciales para acceder</p>
+<Layout title="Fichar — Iniciar sesión">
+  <main class="page">
+    <div class="card">
+      <header class="card-head">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+              <polyline points="10 17 15 12 10 7"></polyline>
+              <line x1="15" y1="12" x2="3" y2="12"></line>
+            </svg>
+          </div>
+          <span class="brand-name">Fichar</span>
+        </div>
+        <h1 class="title">Iniciar sesión</h1>
+        <p class="subtitle">Ingresá tus credenciales para acceder al sistema.</p>
+      </header>
 
-    <div class="login-card">
-      <form id="login-form" class="login-form">
-        <div class="input-group">
-          <label for="dni" class="input-label">DNI</label>
-          <input 
-            type="text" 
-            id="dni" 
-            name="dni" 
-            class="input-field"
-            placeholder="Ingrese su DNI"
+      <form id="login-form" class="form" novalidate>
+        <div class="field">
+          <label for="dni" class="label">DNI</label>
+          <input
+            type="text"
+            id="dni"
+            name="dni"
+            class="input"
+            placeholder="20123456"
             required
             autocomplete="off"
             inputmode="numeric"
             pattern="[0-9]+"
           />
         </div>
-        
-        <div class="input-group">
-          <label for="password" class="input-label">Contraseña</label>
-          <input 
-            type="password" 
-            id="password" 
-            name="password" 
-            class="input-field"
-            placeholder="Ingrese su contraseña"
+
+        <div class="field">
+          <label for="password" class="label">Contraseña</label>
+          <input
+            type="password"
+            id="password"
+            name="password"
+            class="input"
+            placeholder="••••••••"
             required
             autocomplete="current-password"
           />
         </div>
-        
-        <button type="submit" class="submit-btn" id="submit-btn">
-          <span class="btn-text">Iniciar Sesión</span>
-          <span class="btn-loading" style="display: none;">Ingresando...</span>
+
+        <button type="submit" class="button button-primary" id="submit-btn">
+          <span class="btn-text">Ingresar</span>
+          <span class="btn-loading" hidden>
+            <span class="spinner" aria-hidden="true"></span>
+            Ingresando…
+          </span>
         </button>
+
+        <div id="result" class="alert" role="status" hidden></div>
       </form>
 
-      <div id="result" class="result" style="display: none;"></div>
-    </div>
-
-    <div class="back-link">
-      <a href="/" class="link">← Volver al inicio</a>
+      <footer class="card-foot">
+        <a href="/" class="link-muted">← Volver al inicio</a>
+      </footer>
     </div>
   </main>
 </Layout>
@@ -73,43 +80,38 @@ import Layout from '../layouts/Layout.astro';
     submitBtn.disabled = loading;
     const btnText = submitBtn.querySelector('.btn-text') as HTMLSpanElement;
     const btnLoading = submitBtn.querySelector('.btn-loading') as HTMLSpanElement;
-    btnText.style.display = loading ? 'none' : 'inline';
-    btnLoading.style.display = loading ? 'inline' : 'none';
+    btnText.hidden = loading;
+    btnLoading.hidden = !loading;
   }
 
   function showResult(success: boolean, message: string) {
-    resultDiv.style.display = 'block';
-    resultDiv.className = 'result ' + (success ? 'success' : 'error');
+    resultDiv.hidden = false;
+    resultDiv.className = 'alert ' + (success ? 'alert-success' : 'alert-danger');
     resultDiv.textContent = message;
   }
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    
+
     const dni = dniInput.value.trim();
     const password = passwordInput.value;
     if (!dni || !password) return;
 
     setLoading(true);
-    resultDiv.style.display = 'none';
+    resultDiv.hidden = true;
 
     try {
       const response = await api.login(dni, password);
-      
-      // Save auth data
+
       auth.setToken(response.token);
       auth.setUser(response.user);
 
-      // Check if password change is required
       if (response.must_change_password) {
         window.location.href = '/change-password';
+      } else if (response.user.role === 'ADMIN') {
+        window.location.href = '/admin';
       } else {
-        // Redirect based on role
-        if (response.user.role === 'ADMIN') {
-          window.location.href = '/admin';
-        } else {
-          window.location.href = '/employee';
-        }
+        window.location.href = '/employee';
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Error desconocido';
@@ -121,152 +123,220 @@ import Layout from '../layouts/Layout.astro';
 </script>
 
 <style>
-  .container {
+  .page {
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    min-height: 100vh;
-    padding: 1.5rem;
-    background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
     min-height: 100dvh;
+    padding: var(--space-6);
+    background:
+      radial-gradient(circle at 20% 0%, rgba(94, 106, 210, 0.06), transparent 40%),
+      radial-gradient(circle at 80% 100%, rgba(94, 106, 210, 0.04), transparent 50%),
+      var(--color-bg);
   }
 
-  .logo {
-    color: #3b82f6;
-    margin-bottom: 1rem;
+  .card {
+    width: 100%;
+    max-width: var(--container-xs);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-sm);
+    padding: var(--space-8);
+  }
+
+  .card-head {
+    margin-bottom: var(--space-6);
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-6);
+  }
+
+  .brand-mark {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    background: var(--color-accent);
+    color: var(--color-fg-on-accent);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-xs);
+  }
+
+  .brand-name {
+    font-size: var(--text-md);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-tight);
+    color: var(--color-fg);
   }
 
   .title {
-    font-size: 1.75rem;
-    font-weight: 700;
-    margin: 0;
-    color: #1e293b;
+    font-size: var(--text-2xl);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-tighter);
+    color: var(--color-fg);
+    margin-bottom: var(--space-2);
   }
 
   .subtitle {
-    font-size: 0.875rem;
-    color: #64748b;
-    margin: 0.5rem 0 1.5rem;
+    font-size: var(--text-md);
+    color: var(--color-fg-muted);
+    line-height: var(--leading-snug);
   }
 
-  .login-card {
-    background: white;
-    border-radius: 1rem;
-    padding: 2rem;
-    width: 100%;
-    max-width: 360px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-  }
-
-  .login-form {
+  .form {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: var(--space-4);
   }
 
-  .input-group {
+  .field {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--space-2);
   }
 
-  .input-label {
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: #374151;
+  .label {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--color-fg-muted);
+    letter-spacing: var(--tracking-tight);
   }
 
-  .input-field {
-    padding: 0.75rem 1rem;
-    border: 2px solid #e5e7eb;
-    border-radius: 0.5rem;
-    font-size: 1rem;
-    transition: border-color 0.2s, box-shadow 0.2s;
+  .input {
     width: 100%;
-    box-sizing: border-box;
+    padding: var(--space-3) var(--space-4);
+    font-size: var(--text-md);
+    color: var(--color-fg);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    transition:
+      border-color var(--duration-fast) var(--ease-out),
+      box-shadow var(--duration-fast) var(--ease-out),
+      background var(--duration-fast) var(--ease-out);
   }
 
-  .input-field:focus {
+  .input::placeholder {
+    color: var(--color-fg-subtle);
+  }
+
+  .input:hover {
+    border-color: var(--color-fg-subtle);
+  }
+
+  .input:focus {
     outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    border-color: var(--color-accent);
+    box-shadow: var(--shadow-focus);
   }
 
-  .input-field::placeholder {
-    color: #9ca3af;
+  .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-5);
+    font-size: var(--text-md);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-tight);
+    border-radius: var(--radius-md);
+    transition:
+      background var(--duration-fast) var(--ease-out),
+      transform var(--duration-fast) var(--ease-out),
+      box-shadow var(--duration-fast) var(--ease-out);
+    margin-top: var(--space-2);
   }
 
-  .submit-btn {
-    padding: 0.75rem 1.5rem;
-    background: #3b82f6;
-    color: white;
-    border: none;
-    border-radius: 0.5rem;
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background-color 0.2s, transform 0.1s;
-    margin-top: 0.5rem;
-  }
-
-  .submit-btn:hover:not(:disabled) {
-    background: #2563eb;
-  }
-
-  .submit-btn:active:not(:disabled) {
-    transform: scale(0.98);
-  }
-
-  .submit-btn:disabled {
-    opacity: 0.7;
+  .button:disabled {
     cursor: not-allowed;
+    opacity: 0.7;
   }
 
-  .result {
-    margin-top: 1rem;
-    padding: 0.75rem;
-    border-radius: 0.5rem;
+  .button-primary {
+    background: var(--color-accent);
+    color: var(--color-fg-on-accent);
+    box-shadow: var(--shadow-xs);
+  }
+
+  .button-primary:hover:not(:disabled) {
+    background: var(--color-accent-hover);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .button-primary:active:not(:disabled) {
+    background: var(--color-accent-active);
+    transform: translateY(1px);
+  }
+
+  .btn-loading {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: var(--color-fg-on-accent);
+    border-radius: var(--radius-full);
+    animation: spin 0.6s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .alert {
+    padding: var(--space-3) var(--space-4);
+    font-size: var(--text-sm);
+    border: 1px solid;
+    border-radius: var(--radius-md);
+    animation: slide-in var(--duration-base) var(--ease-out);
+  }
+
+  .alert-success {
+    background: var(--color-success-bg);
+    border-color: var(--color-success-border);
+    color: var(--color-success-fg);
+  }
+
+  .alert-danger {
+    background: var(--color-danger-bg);
+    border-color: var(--color-danger-border);
+    color: var(--color-danger-fg);
+  }
+
+  @keyframes slide-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .card-foot {
+    margin-top: var(--space-6);
+    padding-top: var(--space-6);
+    border-top: 1px solid var(--color-border);
     text-align: center;
-    font-size: 0.875rem;
-    animation: fadeIn 0.3s ease-out;
   }
 
-  .result.success {
-    background: #ecfdf5;
-    border: 1px solid #10b981;
-    color: #065f46;
+  .link-muted {
+    color: var(--color-fg-muted);
+    font-size: var(--text-sm);
   }
 
-  .result.error {
-    background: #fef2f2;
-    border: 1px solid #ef4444;
-    color: #991b1b;
+  .link-muted:hover {
+    color: var(--color-fg);
   }
 
-  @keyframes fadeIn {
-    from {
-      opacity: 0;
-      transform: translateY(-0.5rem);
+  @media (max-width: 480px) {
+    .card {
+      padding: var(--space-6);
+      border-radius: var(--radius-lg);
     }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  .back-link {
-    margin-top: 1.5rem;
-  }
-
-  .link {
-    color: #64748b;
-    text-decoration: none;
-    font-size: 0.875rem;
-  }
-
-  .link:hover {
-    color: #3b82f6;
-    text-decoration: underline;
   }
 </style>

@@ -2,49 +2,34 @@
 import Layout from '../layouts/Layout.astro';
 ---
 
-<Layout title="Fichar - Cerrar Sesión">
-  <main class="container">
-    <div class="spinner"></div>
-    <p class="message">Cerrando sesión...</p>
+<Layout title="Fichar — Cerrando sesión">
+  <main class="page">
+    <span class="spinner spinner-lg" aria-hidden="true"></span>
+    <p class="message">Cerrando sesión…</p>
   </main>
 </Layout>
 
 <script>
   import { auth } from '../config/api';
 
-  // Clear auth and redirect
   auth.removeToken();
   auth.removeUser();
   window.location.href = '/login';
 </script>
 
 <style>
-  .container {
+  .page {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    min-height: 100vh;
-    background: #f8fafc;
-  }
-
-  .spinner {
-    width: 40px;
-    height: 40px;
-    border: 3px solid #e5e7eb;
-    border-top-color: #3b82f6;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
+    gap: var(--space-4);
+    min-height: 100dvh;
+    background: var(--color-bg);
   }
 
   .message {
-    margin-top: 1rem;
-    color: #64748b;
+    color: var(--color-fg-muted);
+    font-size: var(--text-md);
   }
 </style>

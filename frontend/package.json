@@ -3,9 +3,10 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "node src/server/entry.mjs",
+    "dev": "astro dev",
     "build": "astro build",
-    "preview": "node src/server/entry.mjs",
+    "preview": "astro preview",
+    "start": "node src/server/entry.mjs",
     "astro": "astro"
   },
   "dependencies": {
